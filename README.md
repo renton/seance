@@ -44,25 +44,27 @@ mkdir -p ~/.seance
 for d in ~/code/*/; do git -C "$d" rev-parse --git-dir >/dev/null 2>&1 && printf '%-26s %s\n' "$(basename "$d")" "${d%/}"; done >> ~/.seance/repos
 ```
 
-### Branch names (optional)
+### Optional settings
 
-Branches are named `feature/<TICKET>` by default. Set `SEANCE_BRANCH_FORMAT` to change that, for example in `~/.bashrc`:
+seance works without any of these. Each is an environment variable: add the `export` lines you want to your shell's startup file (`~/.bashrc` for bash, `~/.zshrc` for zsh), then open a new terminal or run `source ~/.bashrc`. Claude sessions you start afterwards see them too, so they also apply when Claude runs seance for you.
 
-```
-export SEANCE_BRANCH_FORMAT='feature/{ticket}'       # the default
-export SEANCE_BRANCH_FORMAT='{ticket}'
-export SEANCE_BRANCH_FORMAT='me/{repo}/{ticket}'
-```
+| Variable | Default | What it does |
+|---|---|---|
+| `SEANCE_BRANCH_FORMAT` | `feature/{ticket}` | The branch name for a ticket. `{ticket}` is required; `{repo}` is the name from the lookup table. |
+| `SEANCE_JIRA_URL` | unset | Your Jira site. Adds the ticket's link to the session's first prompt and to `seance list`. |
+| `SEANCE_HOME` | `~/.seance` | Where the lookup table and session records live. |
 
-`{ticket}` is required; `{repo}` is the name from the lookup table.
-
-### Jira site (optional)
+For example:
 
 ```
+# ~/.bashrc
+export SEANCE_BRANCH_FORMAT='feature/{ticket}'
 export SEANCE_JIRA_URL=https://yourcompany.atlassian.net
 ```
 
-Without it, the session finds your Jira site through the Atlassian MCP, which works when your account reaches one site. With it, the session's first prompt carries the ticket's link and names the site, so it reads the ticket directly (and the right one, if you have several sites), and `seance list` shows a link beside each ticket's worktree.
+**Branch format examples:** `feature/{ticket}` gives `feature/PROJ-123`; `{ticket}` gives `PROJ-123`; `me/{repo}/{ticket}` gives `me/my-service/PROJ-123`.
+
+**Do you need `SEANCE_JIRA_URL`?** Without it, the session finds your Jira site through the Atlassian MCP, which works when your account reaches only one site. Set it if you have several sites (so the session reads the ticket from the right one), or if you want ticket links in `seance list`.
 
 ### Trust
 
