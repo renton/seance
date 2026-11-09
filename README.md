@@ -56,6 +56,14 @@ export SEANCE_BRANCH_FORMAT='me/{repo}/{ticket}'
 
 `{ticket}` is required; `{repo}` is the name from the lookup table.
 
+### Jira site (optional)
+
+```
+export SEANCE_JIRA_URL=https://yourcompany.atlassian.net
+```
+
+Without it, the session finds your Jira site through the Atlassian MCP, which works when your account reaches one site. With it, the session's first prompt carries the ticket's link and names the site, so it reads the ticket directly (and the right one, if you have several sites), and `seance list` shows a link beside each ticket's worktree.
+
 ### Trust
 
 Claude only starts background sessions in folders you have trusted. Trusting a parent folder (for example the one holding all your repos) covers every repo and worktree under it.

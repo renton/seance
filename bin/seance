@@ -15,6 +15,7 @@
 #
 # Environment: SEANCE_BRANCH_FORMAT  branch name template, default feature/{ticket} ({repo} also works)
 #              SEANCE_HOME           config folder, default ~/.seance
+#              SEANCE_JIRA_URL       your Jira site (https://example.atlassian.net), for ticket links
 
 set -euo pipefail
 
@@ -24,6 +25,23 @@ SESSIONS_FILE="$SEANCE_HOME/sessions.tsv"
 WORKTREE_DIR=".claude/worktrees"
 BRANCH_FORMAT="${SEANCE_BRANCH_FORMAT:-}"
 [[ -n "$BRANCH_FORMAT" ]] || BRANCH_FORMAT='feature/{ticket}'
+JIRA_URL="${SEANCE_JIRA_URL:-}"
+JIRA_URL="${JIRA_URL%/}"
+
+ticket_url() {
+  [[ -n "$JIRA_URL" ]] && echo "$JIRA_URL/browse/$1"
+}
+
+# How the session should find the ticket: by its link and site when SEANCE_JIRA_URL is set.
+ticket_source() {
+  local ticket=$1
+  if [[ -n "$JIRA_URL" ]]; then
+    local host=${JIRA_URL#*://}
+    echo "$ticket ($(ticket_url "$ticket")) with the Atlassian MCP, using $host as the cloudId"
+  else
+    echo "$ticket with the Atlassian MCP"
+  fi
+}
 
 die() { echo "seance: $*" >&2; exit 1; }
 note() { echo "seance: $*" >&2; }
@@ -143,7 +161,7 @@ Start work on Jira ticket $ticket.
 These git worktrees were made for this ticket, one per repo. Read and change files only in them, never in the repo folders themselves. Your working directory is the first.
 $(worktree_lines)
 
-1. Read $ticket with the Atlassian MCP. Read-only: do not comment on, edit or transition it.
+1. Read $(ticket_source "$ticket"). Read-only: do not comment on, edit or transition it.
 2. Restate the acceptance criteria in your own words and flag anything ambiguous, underspecified or with a hidden dependency.
 3. Name every repo the ticket touches, and say if it needs one that has no worktree above.
 4. Investigate the code in these worktrees and write an implementation plan. Change nothing until I approve it.
@@ -158,7 +176,7 @@ This session is a fork of $source, moving on to Jira ticket $ticket.
 These git worktrees were made for this ticket, one per repo. Read and change files only in them, even where earlier messages name other paths. Your working directory is now the first.
 $(worktree_lines)
 
-Read $ticket with the Atlassian MCP (read-only: no comments, edits or transitions), restate its acceptance criteria, and write an implementation plan that uses what we already worked out above. Change nothing until I approve it.
+Read $(ticket_source "$ticket") (read-only: no comments, edits or transitions), restate its acceptance criteria, and write an implementation plan that uses what we already worked out above. Change nothing until I approve it.
 EOF
 }
 
@@ -322,7 +340,11 @@ cmd_list() {
       local label=${wt#"$path"/}
       [[ "$label" == "$WORKTREE_DIR"/* ]] && label=${label#"$WORKTREE_DIR"/}
       [[ "$wt" == "$path" ]] && label="repo folder"
-      printf '   %-22s  %s\n' "$label" "$branch"
+      local link=""
+      if [[ -n "$JIRA_URL" && "$wt" != "$path" && "$label" =~ ^[A-Z][A-Z0-9]+-[0-9]+$ ]]; then
+        link="  $dim$(ticket_url "$label")$reset"
+      fi
+      printf '   %-22s  %s%s\n' "$label" "$branch" "$link"
 
       jq -r --arg wt "$wt" --arg reg "$registry" --arg dim "$dim" --arg reset "$reset" '
         ($reg | split("\n") | map(select(length > 0) | split("\t"))) as $rows
