@@ -1,0 +1,415 @@
+#!/usr/bin/env bash
+# seance: start or fork a Claude session for a Jira ticket in its own git worktree.
+#
+#   seance <repo> <TICKET>                 session on the ticket's branch (resumes its last one)
+#   seance <repo> <TICKET> <session-id>    fork that session onto the ticket's branch
+#   seance <repo> <TICKET> here            fork the session this runs inside
+#   seance <repo>,<repo2> <TICKET> ...     a worktree in each repo, one session across them
+#   seance add <repo> [<TICKET>]           inside a session: add a repo's worktree for its ticket
+#   seance list                            repos, worktrees, branches and sessions
+#   seance repos                           the lookup table
+#
+# Options (before the arguments): --bg        start in the background
+#                                  --new       start a fresh session even if the ticket has one
+#                                  --no-fetch  branch from origin/<base> as last fetched
+#
+# Environment: SEANCE_BRANCH_FORMAT  branch name template, default feature/{ticket} ({repo} also works)
+#              SEANCE_HOME           config folder, default ~/.seance
+
+set -euo pipefail
+
+SEANCE_HOME="${SEANCE_HOME:-$HOME/.seance}"
+REPOS_FILE="$SEANCE_HOME/repos"
+SESSIONS_FILE="$SEANCE_HOME/sessions.tsv"
+WORKTREE_DIR=".claude/worktrees"
+BRANCH_FORMAT="${SEANCE_BRANCH_FORMAT:-}"
+[[ -n "$BRANCH_FORMAT" ]] || BRANCH_FORMAT='feature/{ticket}'
+
+die() { echo "seance: $*" >&2; exit 1; }
+note() { echo "seance: $*" >&2; }
+
+usage() {
+  sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-0}"
+}
+
+is_terminal() { [[ -t 0 && -t 1 ]]; }
+
+branch_name() {
+  local repo_name=$1 ticket=$2 branch
+  [[ "$BRANCH_FORMAT" == *"{ticket}"* ]] || die "SEANCE_BRANCH_FORMAT must contain {ticket} (it is '$BRANCH_FORMAT')"
+  branch=${BRANCH_FORMAT//\{ticket\}/$ticket}
+  branch=${branch//\{repo\}/$repo_name}
+  git check-ref-format --branch "$branch" >/dev/null 2>&1 || die "'$branch' is not a valid branch name (from SEANCE_BRANCH_FORMAT)"
+  echo "$branch"
+}
+
+repo_field() {
+  [[ -f "$REPOS_FILE" ]] || die "no lookup table at $REPOS_FILE"
+  awk -v name="$1" -v col="$2" '$0 !~ /^[[:space:]]*(#|$)/ && $1 == name { print $col; exit }' "$REPOS_FILE"
+}
+
+repo_names() {
+  awk '$0 !~ /^[[:space:]]*(#|$)/ { print $1 "\t" $2 }' "$REPOS_FILE"
+}
+
+repo_table() {
+  awk '$0 !~ /^[[:space:]]*(#|$)/ { print $1 "\t" $2 "\t" ($3 == "" ? "(origin default)" : $3) }' "$REPOS_FILE"
+}
+
+default_branch() {
+  local repo=$1 pinned=$2 ref
+  if [[ -n "$pinned" ]]; then
+    echo "$pinned"
+    return
+  fi
+  if ref=$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null); then
+    echo "${ref#origin/}"
+    return
+  fi
+  for ref in main master; do
+    if git -C "$repo" show-ref --verify --quiet "refs/remotes/origin/$ref"; then
+      echo "$ref"
+      return
+    fi
+  done
+  die "cannot tell $repo's default branch (no origin/HEAD, origin/main or origin/master)"
+}
+
+ensure_excluded() {
+  local repo=$1 exclude
+  exclude="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+  mkdir -p "$(dirname "$exclude")"
+  if ! grep -qxF "/$WORKTREE_DIR/" "$exclude" 2>/dev/null; then
+    printf '/%s/\n' "$WORKTREE_DIR" >>"$exclude"
+    note "added /$WORKTREE_DIR/ to $exclude (local ignore, not committed)"
+  fi
+}
+
+worktree_for_branch() {
+  git -C "$1" worktree list --porcelain | awk -v want="branch refs/heads/$2" '
+    /^worktree / { path = substr($0, 10) }
+    $0 == want { print path; exit }'
+}
+
+prepare_worktree() {
+  local repo=$1 ticket=$2 do_fetch=$3 pinned=$4 branch=$5
+  local wt="$repo/$WORKTREE_DIR/$ticket" existing base
+
+  ensure_excluded "$repo"
+
+  existing=$(worktree_for_branch "$repo" "$branch")
+  if [[ -n "$existing" ]]; then
+    note "reusing worktree $existing ($branch)"
+    WORKTREE=$existing
+    return
+  fi
+  [[ -e "$wt" ]] && die "$wt exists but is not the worktree for $branch; sort it out by hand"
+
+  if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then
+    note "branch $branch exists; checking it out in a new worktree"
+    git -C "$repo" worktree add "$wt" "$branch" >&2
+  else
+    base=$(default_branch "$repo" "$pinned")
+    if [[ "$do_fetch" == yes ]]; then
+      note "fetching origin/$base"
+      git -C "$repo" fetch origin "$base" >&2
+    else
+      note "not fetching; $branch starts from origin/$base as of the last fetch"
+    fi
+    git -C "$repo" worktree add --no-track -b "$branch" "$wt" "origin/$base" >&2
+  fi
+  WORKTREE=$wt
+}
+
+record_session() {
+  mkdir -p "$SEANCE_HOME"
+  [[ -f "$SESSIONS_FILE" ]] || printf 'created\trepo\tticket\tname\tsession_id\tworktree\tforked_from\n' >"$SESSIONS_FILE"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -Iseconds)" "$@" >>"$SESSIONS_FILE"
+}
+
+worktree_lines() {
+  local i
+  for i in "${!WORKTREES[@]}"; do
+    printf -- '- %s: %s (branch %s)\n' "${REPO_NAMES[$i]}" "${WORKTREES[$i]}" "${BRANCHES[$i]}"
+  done
+}
+
+new_prompt() {
+  local ticket=$1
+  cat <<EOF
+Start work on Jira ticket $ticket.
+
+These git worktrees were made for this ticket, one per repo. Read and change files only in them, never in the repo folders themselves. Your working directory is the first.
+$(worktree_lines)
+
+1. Read $ticket with the Atlassian MCP. Read-only: do not comment on, edit or transition it.
+2. Restate the acceptance criteria in your own words and flag anything ambiguous, underspecified or with a hidden dependency.
+3. Name every repo the ticket touches, and say if it needs one that has no worktree above.
+4. Investigate the code in these worktrees and write an implementation plan. Change nothing until I approve it.
+EOF
+}
+
+fork_prompt() {
+  local ticket=$1 source=$2
+  cat <<EOF
+This session is a fork of $source, moving on to Jira ticket $ticket.
+
+These git worktrees were made for this ticket, one per repo. Read and change files only in them, even where earlier messages name other paths. Your working directory is now the first.
+$(worktree_lines)
+
+Read $ticket with the Atlassian MCP (read-only: no comments, edits or transitions), restate its acceptance criteria, and write an implementation plan that uses what we already worked out above. Change nothing until I approve it.
+EOF
+}
+
+extra_dirs() {
+  local i
+  for i in "${!WORKTREES[@]}"; do
+    ((i == 0)) && continue
+    printf '%s\0%s\0' --add-dir "${WORKTREES[$i]}"
+  done
+}
+
+record_all() {
+  local ticket=$1 name=$2 sid=$3 source=$4 i
+  for i in "${!WORKTREES[@]}"; do
+    record_session "${REPO_NAMES[$i]}" "$ticket" "$name" "$sid" "${WORKTREES[$i]}" "$source"
+  done
+}
+
+last_session_for() {
+  awk -F'\t' -v wt="$1" 'NR > 1 && $6 == wt { sid = $5 } END { print sid }' "$SESSIONS_FILE" 2>/dev/null || true
+}
+
+resume_session() {
+  local sid=$1 background=$2 live kind
+  live=$(claude agents --json 2>/dev/null | jq -c --arg sid "$sid" '.[] | select(.sessionId == $sid)' | head -1)
+  if [[ -n "$live" ]]; then
+    kind=$(jq -r .kind <<<"$live")
+    if [[ "$kind" == background ]]; then
+      echo "Already running in the background: claude attach $(jq -r .id <<<"$live")"
+    else
+      echo "Already open in another terminal (pid $(jq -r .pid <<<"$live"))."
+    fi
+    return
+  fi
+  local -a dirs=()
+  mapfile -d '' dirs < <(extra_dirs)
+  cd "${WORKTREES[0]}"
+  if [[ "$background" == yes ]]; then
+    claude --bg --resume "$sid" "${dirs[@]}" 2>&1 | grep -v 'blocked by enterprise policy'
+    return
+  fi
+  note "resuming ${sid:0:8} (seance --new starts a fresh session instead)"
+  exec claude --resume "$sid" "${dirs[@]}"
+}
+
+start_session() {
+  local ticket=$1 source=$2 background=$3
+  local name="${REPO_NAMES[0]}-$ticket" prompt sid out short
+  local -a args=(-n "$name" --permission-mode plan) dirs=()
+  mapfile -d '' dirs < <(extra_dirs)
+  args+=("${dirs[@]}")
+
+  if [[ -n "$source" ]]; then
+    prompt=$(fork_prompt "$ticket" "$source")
+    args+=(--resume "$source" --fork-session)
+  else
+    prompt=$(new_prompt "$ticket")
+  fi
+
+  cd "${WORKTREES[0]}"
+
+  if [[ "$background" == yes ]]; then
+    out=$(claude --bg "${args[@]}" "$prompt" 2>&1 | grep -v 'blocked by enterprise policy') || {
+      echo "$out" >&2
+      die "claude --bg failed"
+    }
+    short=$(sed -n 's/^backgrounded · \([0-9a-f]*\) · .*/\1/p' <<<"$out" | head -1)
+    [[ -n "$short" ]] || { echo "$out" >&2; die "could not read the background session's id"; }
+    sid=""
+    for _ in 1 2 3 4 5; do
+      sid=$(claude agents --json 2>/dev/null | jq -r --arg id "$short" '.[] | select(.id == $id) | .sessionId' | head -1)
+      [[ -n "$sid" ]] && break
+      sleep 1
+    done
+    record_all "$ticket" "$name" "${sid:-$short}" "${source:--}"
+    echo "Started $name in the background ($short), in ${WORKTREES[0]}"
+    echo "  claude attach $short"
+    return
+  fi
+
+  sid=$(cat /proc/sys/kernel/random/uuid)
+  record_all "$ticket" "$name" "$sid" "${source:--}"
+  exec claude "${args[@]}" --session-id "$sid" "$prompt"
+}
+
+# Add a repo's worktree to the session this runs in, for the ticket that session works on.
+cmd_add() {
+  local repo_name=$1 ticket=${2:-} do_fetch=$3
+  if [[ -z "$ticket" ]]; then
+    [[ "$PWD/" =~ /$WORKTREE_DIR/([^/]+)/ ]] || die "cannot tell the ticket from $PWD; give it: seance add <repo> <TICKET>"
+    ticket=${BASH_REMATCH[1]}
+  fi
+  ticket=${ticket^^}
+
+  resolve_repo "$repo_name" "$ticket" "$do_fetch"
+
+  local sid=${CLAUDE_CODE_SESSION_ID:-} name="$repo_name-$ticket"
+  if [[ -n "$sid" ]]; then
+    local known
+    known=$(awk -F'\t' -v sid="$sid" 'NR > 1 && $5 == sid { name = $4 } END { print name }' "$SESSIONS_FILE" 2>/dev/null || true)
+    [[ -n "$known" ]] && name=$known
+    record_all "$ticket" "$name" "$sid" "-"
+  fi
+
+  echo "Worktree ready: ${WORKTREES[0]} (branch ${BRANCHES[0]})"
+  echo "Give the session access by typing this at its prompt:"
+  echo "  /add-dir ${WORKTREES[0]}"
+}
+
+# Look a repo up, check it, and prepare its worktree; appends to REPO_NAMES, WORKTREES, BRANCHES.
+resolve_repo() {
+  local repo_name=$1 ticket=$2 do_fetch=$3 path pinned branch
+  path=$(repo_field "$repo_name" 2)
+  pinned=$(repo_field "$repo_name" 3)
+  [[ -n "$path" ]] || die "no repo '$repo_name' in $REPOS_FILE (see: seance repos)"
+  git -C "$path" rev-parse --git-dir >/dev/null 2>&1 || die "$path is not a git repository"
+  branch=$(branch_name "$repo_name" "$ticket")
+  WORKTREE=""
+  prepare_worktree "$path" "$ticket" "$do_fetch" "$pinned" "$branch"
+  REPO_NAMES+=("$repo_name")
+  WORKTREES+=("$WORKTREE")
+  BRANCHES+=("$branch")
+}
+
+cmd_repos() {
+  [[ -f "$REPOS_FILE" ]] || die "no lookup table at $REPOS_FILE"
+  repo_table | column -t -s $'\t'
+}
+
+cmd_list() {
+  [[ -f "$REPOS_FILE" ]] || die "no lookup table at $REPOS_FILE"
+  local agents registry
+  agents=$(claude agents --json --all 2>/dev/null || echo '[]')
+  registry=$(tail -n +2 "$SESSIONS_FILE" 2>/dev/null || true)
+
+  local bold="" dim="" reset=""
+  if [[ -t 1 ]]; then
+    bold=$'\e[1m' dim=$'\e[2m' reset=$'\e[0m'
+  fi
+  local width=${COLUMNS:-}
+  [[ -n "$width" ]] || width=$(tput cols 2>/dev/null || echo 80)
+  ((width > 100)) && width=100
+
+  local name path first=yes
+  while IFS=$'\t' read -r name path; do
+    [[ "$first" == yes ]] && first=no || echo
+
+    local shown=${path/#$HOME/\~} fill rule
+    fill=$((width - ${#name} - ${#shown} - 6))
+    ((fill < 3)) && fill=3
+    rule=$(printf '─%.0s' $(seq "$fill"))
+    printf '── %s%s%s %s %s%s%s\n' "$bold" "$name" "$reset" "$rule" "$dim" "$shown" "$reset"
+
+    if [[ ! -d "$path/.git" && ! -f "$path/.git" ]]; then
+      printf '   %s(missing)%s\n' "$dim" "$reset"
+      continue
+    fi
+
+    local wt branch
+    while IFS=$'\t' read -r wt branch; do
+      local label=${wt#"$path"/}
+      [[ "$label" == "$WORKTREE_DIR"/* ]] && label=${label#"$WORKTREE_DIR"/}
+      [[ "$wt" == "$path" ]] && label="repo folder"
+      printf '   %-22s  %s\n' "$label" "$branch"
+
+      jq -r --arg wt "$wt" --arg reg "$registry" --arg dim "$dim" --arg reset "$reset" '
+        ($reg | split("\n") | map(select(length > 0) | split("\t"))) as $rows
+        | ($rows | map(select(.[5] == $wt) | {repo: .[1], ticket: .[2], name: .[3], sid: .[4], forked: .[6]})
+          | unique_by(.sid)) as $ours
+        | (map({key: .sessionId, value: .}) | from_entries) as $live
+        | ($ours | map(.sid)) as $ourIds
+        | ($ours[] | . as $s | ($live[$s.sid] // null) as $a
+            | ($rows | map(select(.[4] == $s.sid) | .[1])
+               | reduce .[] as $r ([]; if index([$r]) then . else . + [$r] end) | join(",")) as $repos
+            | "     └─ \($s.name)  \($dim)\($s.sid[0:8])\($reset)  "
+              + (if $a == null then "stopped \($dim)(seance \($repos) \($s.ticket))\($reset)"
+                 else "\($a.kind) \($a.status // $a.state)" end)
+              + (if $s.forked != "-" then "  \($dim)fork of \($s.forked[0:8])\($reset)" else "" end)),
+          (.[] | select(.cwd == $wt and ((.sessionId | IN($ourIds[])) | not))
+            | "     └─ \(.name)  \($dim)\(.sessionId[0:8])\($reset)  \(.kind) \(.status // .state)  \($dim)(not from seance)\($reset)")
+      ' <<<"$agents"
+    done < <(git -C "$path" worktree list --porcelain | awk '
+      /^worktree / { path = substr($0, 10); branch = "" }
+      /^branch /   { branch = substr($0, 19) }
+      /^detached/  { branch = "(detached)" }
+      /^$/         { if (path != "") print path "\t" branch; path = "" }
+      END          { if (path != "") print path "\t" branch }')
+  done < <(repo_names)
+}
+
+main() {
+  local background=auto do_fetch=auto force_new=no
+  while [[ $# -gt 0 && "$1" == --* ]]; do
+    case "$1" in
+      --bg) background=yes ;;
+      --no-fetch) do_fetch=no ;;
+      --new) force_new=yes ;;
+      --help) usage 0 ;;
+      *) die "unknown option $1" ;;
+    esac
+    shift
+  done
+
+  case "${1:-}" in
+    "" | help | -h) usage 0 ;;
+    list) cmd_list; return ;;
+    repos) cmd_repos; return ;;
+  esac
+
+  # Run from a terminal by a person: fetch and open the session here.
+  # Run by Claude (no terminal): never touch the remote, and start in the background.
+  if is_terminal; then
+    [[ "$do_fetch" == auto ]] && do_fetch=yes
+    [[ "$background" == auto ]] && background=no
+  else
+    do_fetch=no
+    background=yes
+  fi
+
+  REPO_NAMES=() WORKTREES=() BRANCHES=()
+
+  if [[ "$1" == add ]]; then
+    [[ $# -ge 2 && $# -le 3 ]] || usage 1
+    cmd_add "$2" "${3:-}" "$do_fetch"
+    return
+  fi
+
+  [[ $# -ge 2 && $# -le 3 ]] || usage 1
+  local repos=$1 ticket=${2^^} source=${3:-}
+  [[ "$ticket" =~ ^[A-Z][A-Z0-9]+-[0-9]+$ ]] || die "'$2' does not look like a Jira key (PROJ-123)"
+
+  if [[ "$source" == here ]]; then
+    source=${CLAUDE_CODE_SESSION_ID:-}
+    [[ -n "$source" ]] || die "'here' only works inside a Claude session"
+  fi
+
+  local -a names
+  IFS=, read -ra names <<<"$repos"
+  [[ ${#names[@]} -gt 0 ]] || usage 1
+  local name
+  for name in "${names[@]}"; do
+    resolve_repo "$name" "$ticket" "$do_fetch"
+  done
+
+  local previous
+  previous=$(last_session_for "${WORKTREES[0]}")
+  if [[ -z "$source" && "$force_new" == no && -n "$previous" ]]; then
+    resume_session "$previous" "$background"
+    return
+  fi
+  start_session "$ticket" "$source" "$background"
+}
+
+main "$@"
