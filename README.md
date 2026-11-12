@@ -6,7 +6,7 @@ Start, resume or fork a [Claude Code](https://claude.com/claude-code) session fo
 seance my-service PROJ-123
 ```
 
-creates a worktree for `PROJ-123` on its own branch, fresh from the remote's base branch, and opens a Claude session there that reads the ticket and writes a plan. Run it again later and it resumes that session. Fork an existing session onto a new ticket and the fork keeps the whole conversation.
+creates a worktree for `PROJ-123` on its own branch, fresh from the remote's base branch, and opens a Claude session there that reads the ticket and gets oriented in the code. Run it again later and it resumes that session. Fork an existing session onto a new ticket and the fork keeps the whole conversation.
 
 ## Setup
 
@@ -16,6 +16,7 @@ creates a worktree for `PROJ-123` on its own branch, fresh from the remote's bas
 - git 2.31 or newer
 - `jq`
 - bash
+- `fzf` (optional, for the `seance pick` menu)
 - An Atlassian (Jira) MCP server connected to Claude Code, for the session to read the ticket
 
 ### Install
@@ -52,6 +53,7 @@ seance works without any of these. Each is an environment variable: add the `exp
 |---|---|---|
 | `SEANCE_BRANCH_FORMAT` | `feature/{ticket}` | The branch name for a ticket. `{ticket}` is required; `{repo}` is the name from the lookup table. |
 | `SEANCE_JIRA_URL` | unset | Your Jira site. Adds the ticket's link to the session's first prompt and to `seance list`. |
+| `SEANCE_NOTES_DIR` | unset | A folder of notes on your repos: `INDEX.md` for how they connect, `<repo>.md` per repo (named as in the lookup table). A new session is told to read the ones that exist for its repos. |
 | `SEANCE_HOME` | `~/.seance` | Where the lookup table and session records live. |
 
 For example:
@@ -79,6 +81,7 @@ seance <repo> <TICKET> here            fork the session this runs inside
 seance <repo>,<repo2> <TICKET> ...     a worktree in each repo, one session across them
 seance add <repo> [<TICKET>]           inside a session: add a repo's worktree for its ticket
 seance list                            repos, worktrees, branches and sessions
+seance pick                            choose a session from a menu and attach to or resume it
 seance repos                           the lookup table
 seance help
 
@@ -96,7 +99,7 @@ seance my-service PROJ-123
 
 1. Fetches the base branch and creates the worktree `my-service/.claude/worktrees/PROJ-123` on a new branch `feature/PROJ-123` from `origin/<base>`. The repo folder itself is never touched, so a messy working directory there does not matter and nothing needs pulling. An existing branch or worktree for the ticket is reused.
 2. Adds `/.claude/worktrees/` to the repo's `.git/info/exclude` (a local ignore, never committed), so worktrees stay out of `git status` and searches in the repo folder.
-3. Opens Claude in the worktree, named `my-service-PROJ-123`, in plan mode, with a first prompt to read the ticket (read-only), restate its acceptance criteria, name the repos it touches and write a plan. Plan mode means nothing is changed until you approve the plan.
+3. Opens Claude in the worktree, named `my-service-PROJ-123`, with a first prompt to get up to speed on each repo (reading your notes on them first, if `SEANCE_NOTES_DIR` is set), read the ticket (read-only), restate its acceptance criteria, name the repos it touches, find where the work lives in the code, and then stop. It does not write a plan or change anything; you say what to do next.
 4. Records the session in `~/.seance/sessions.tsv`.
 
 ### Come back to it
@@ -114,7 +117,7 @@ seance my-service PROJ-124 3f2a9c1e-...    # a session id, from `seance list` or
 seance my-service PROJ-124 here            # inside a session: fork this one
 ```
 
-The fork carries the whole conversation into a new session in the new ticket's worktree; the original session is untouched. `here` reads `CLAUDE_CODE_SESSION_ID`, so it works only inside a Claude session (ask Claude to run it).
+The fork carries the whole conversation into a new session in the new ticket's worktree; the original session is untouched. Its first prompt has it read the new ticket and get oriented from what the conversation already knows, without writing a plan. `here` reads `CLAUDE_CODE_SESSION_ID`, so it works only inside a Claude session (ask Claude to run it).
 
 ### A ticket across several repos
 
@@ -165,6 +168,20 @@ seance list
 Worktrees under `.claude/worktrees/` are shown by their folder name (the ticket). Colour is used only when the output is a terminal.
 
 Every repo in the table, each worktree with its branch, and the sessions in it: seance's own, plus any other running session in that folder.
+
+### Pick a session from a menu
+
+```
+seance pick
+```
+
+Lists every session from `seance list`, newest first, one line each, and acts on the one you choose:
+
+- running in the background (busy or idle): `claude attach`
+- stopped, or a background session that has ended: resumes it in its worktree, as `seance <repo> <TICKET>` would, with access to every worktree recorded for it (including ones added with `seance add`)
+- open in another terminal: says so
+
+The menu uses [fzf](https://github.com/junegunn/fzf) when it is installed (type part of a ticket or repo to narrow it down), and a numbered `select` list otherwise. Stopped sessions whose worktree has been removed are left out.
 
 ### Run by you or by Claude
 

@@ -7,6 +7,7 @@
 #   seance <repo>,<repo2> <TICKET> ...     a worktree in each repo, one session across them
 #   seance add <repo> [<TICKET>]           inside a session: add a repo's worktree for its ticket
 #   seance list                            repos, worktrees, branches and sessions
+#   seance pick                            choose a session from a menu and attach to or resume it
 #   seance repos                           the lookup table
 #
 # Options (before the arguments): --bg        start in the background
@@ -16,6 +17,7 @@
 # Environment: SEANCE_BRANCH_FORMAT  branch name template, default feature/{ticket} ({repo} also works)
 #              SEANCE_HOME           config folder, default ~/.seance
 #              SEANCE_JIRA_URL       your Jira site (https://example.atlassian.net), for ticket links
+#              SEANCE_NOTES_DIR      folder of notes on your repos (INDEX.md, <repo>.md) for new sessions to read
 
 set -euo pipefail
 
@@ -27,6 +29,8 @@ BRANCH_FORMAT="${SEANCE_BRANCH_FORMAT:-}"
 [[ -n "$BRANCH_FORMAT" ]] || BRANCH_FORMAT='feature/{ticket}'
 JIRA_URL="${SEANCE_JIRA_URL:-}"
 JIRA_URL="${JIRA_URL%/}"
+NOTES_DIR="${SEANCE_NOTES_DIR:-}"
+NOTES_DIR="${NOTES_DIR%/}"
 
 ticket_url() {
   [[ -n "$JIRA_URL" ]] && echo "$JIRA_URL/browse/$1"
@@ -153,18 +157,37 @@ worktree_lines() {
   done
 }
 
+# The SEANCE_NOTES_DIR files that exist for these repos: INDEX.md, then <repo>.md for each.
+notes_files() {
+  [[ -n "$NOTES_DIR" ]] || return 0
+  local f name
+  for f in "$NOTES_DIR/INDEX.md" $(for name in "${REPO_NAMES[@]}"; do echo "$NOTES_DIR/$name.md"; done); do
+    [[ -f "$f" ]] && printf -- '- %s\n' "$f"
+  done
+  return 0
+}
+
 new_prompt() {
-  local ticket=$1
+  local ticket=$1 notes orient
+  notes=$(notes_files)
+  orient="Get up to speed on each repo above: what it is, its README, and how it is laid out."
+  if [[ -n "$notes" ]]; then
+    orient+=" Start with these notes on the repos and how they connect to each other. They may be out of date, so check the code where it matters:
+$notes"
+  fi
   cat <<EOF
 Start work on Jira ticket $ticket.
 
 These git worktrees were made for this ticket, one per repo. Read and change files only in them, never in the repo folders themselves. Your working directory is the first.
 $(worktree_lines)
 
-1. Read $(ticket_source "$ticket"). Read-only: do not comment on, edit or transition it.
-2. Restate the acceptance criteria in your own words and flag anything ambiguous, underspecified or with a hidden dependency.
-3. Name every repo the ticket touches, and say if it needs one that has no worktree above.
-4. Investigate the code in these worktrees and write an implementation plan. Change nothing until I approve it.
+Get oriented, then stop and wait for me:
+1. $orient
+2. Read $(ticket_source "$ticket"). Read-only: do not comment on, edit or transition it.
+3. Restate the acceptance criteria in your own words and flag anything ambiguous, underspecified or with a hidden dependency.
+4. Name every repo the ticket touches, and say if it needs one that has no worktree above.
+5. Look through the code in these worktrees until you know where the work lives, and tell me briefly.
+Do not write an implementation plan and do not change anything. I will say what to do next.
 EOF
 }
 
@@ -176,7 +199,12 @@ This session is a fork of $source, moving on to Jira ticket $ticket.
 These git worktrees were made for this ticket, one per repo. Read and change files only in them, even where earlier messages name other paths. Your working directory is now the first.
 $(worktree_lines)
 
-Read $(ticket_source "$ticket") (read-only: no comments, edits or transitions), restate its acceptance criteria, and write an implementation plan that uses what we already worked out above. Change nothing until I approve it.
+Get oriented on the new ticket, using what we already know about these repos rather than reading them again, then stop and wait for me:
+1. Read $(ticket_source "$ticket"). Read-only: do not comment on, edit or transition it.
+2. Restate the acceptance criteria in your own words and flag anything ambiguous, underspecified or with a hidden dependency.
+3. Name every repo the ticket touches, and say if it needs one that has no worktree above.
+4. Say briefly where the work lives in the code, looking further only where this ticket goes beyond what we have covered.
+Do not write an implementation plan and do not change anything. I will say what to do next.
 EOF
 }
 
@@ -225,7 +253,7 @@ resume_session() {
 start_session() {
   local ticket=$1 source=$2 background=$3
   local name="${REPO_NAMES[0]}-$ticket" prompt sid out short
-  local -a args=(-n "$name" --permission-mode plan) dirs=()
+  local -a args=(-n "$name") dirs=()
   mapfile -d '' dirs < <(extra_dirs)
   args+=("${dirs[@]}")
 
@@ -371,6 +399,95 @@ cmd_list() {
   done < <(repo_names)
 }
 
+# One line per session, newest first: action, target, dir, repo, name, short id, state.
+# action is attach (target: agent id), open (target: pid) or resume (target: session id).
+# dir is - except for a session seance did not start: the folder to resume it in.
+# A background session with no status has ended, so it is resumed rather than attached.
+pick_rows() {
+  local agents registry
+  agents=$(claude agents --json --all 2>/dev/null || echo '[]')
+  registry=$(tail -n +2 "$SESSIONS_FILE" 2>/dev/null || true)
+  jq -r --arg reg "$registry" --arg roots "$(repo_names)" '
+    ($reg | split("\n") | map(select(length > 0) | split("\t"))) as $rows
+    | ($roots | split("\n") | map(select(length > 0) | split("\t") | {name: .[0], path: (.[1] | rtrimstr("/"))})) as $roots
+    | (map({key: .sessionId, value: .}) | from_entries) as $live
+    | ($rows | map(.[4]) | reverse
+       | reduce .[] as $s ([]; if index([$s]) then . else . + [$s] end)) as $sids
+    | def repo_of($c): [$roots[] | . as $r | select($c == $r.path or ($c | startswith($r.path + "/"))) | .name] | first;
+      def row($a; $dir; $repo; $name; $sid; $extra):
+        if $a == null or ($a.kind == "background" and $a.status == null) then ["resume", $sid, $dir, $repo, $name, $sid[0:8], "stopped" + $extra]
+        elif $a.kind == "background" then ["attach", $a.id, "-", $repo, $name, $sid[0:8], "background \($a.status)" + $extra]
+        else ["open", ($a.pid | tostring), "-", $repo, $name, $sid[0:8], "\($a.kind) \($a.status // $a.state)" + $extra] end
+        | join("\t");
+      ($sids[] | . as $sid | ($rows | map(select(.[4] == $sid))) as $mine
+        | ($mine | map(.[1]) | reduce .[] as $r ([]; if index([$r]) then . else . + [$r] end) | join(",")) as $repos
+        | row($live[$sid] // null; "-"; $repos; $mine[0][3]; $sid; "")),
+      (.[] | select(.sessionId | IN($sids[]) | not) | repo_of(.cwd) as $repo | select($repo != null)
+        | row(.; .cwd; $repo; .name; .sessionId; "  (not from seance)"))
+  ' <<<"$agents"
+}
+
+# The worktrees a session was recorded in, the one it started in first.
+session_worktrees() {
+  awk -F'\t' -v sid="$1" 'NR > 1 && $5 == sid && !seen[$6]++ { print $6 }' "$SESSIONS_FILE" 2>/dev/null || true
+}
+
+cmd_pick() {
+  [[ -f "$REPOS_FILE" ]] || die "no lookup table at $REPOS_FILE"
+  is_terminal || die "pick needs a terminal"
+
+  local -a actions=() targets=() dirs_in=() cells=() lines=() wts=()
+  local action target dir repo name short state
+  while IFS=$'\t' read -r action target dir repo name short state; do
+    if [[ "$action" == resume && "$dir" == - ]]; then
+      mapfile -t wts < <(session_worktrees "$target")
+      [[ ${#wts[@]} -gt 0 && -d "${wts[0]}" ]] || continue
+    elif [[ "$action" == resume ]]; then
+      [[ -d "$dir" ]] || continue
+    fi
+    actions+=("$action") targets+=("$target") dirs_in+=("$dir")
+    cells+=("$repo"$'\t'"$name"$'\t'"$short"$'\t'"$state")
+  done < <(pick_rows)
+  ((${#cells[@]} > 0)) || die "no sessions to pick from"
+  mapfile -t lines < <(printf '%s\n' "${cells[@]}" | column -t -s $'\t' -o '  ')
+
+  local i="" choice
+  if command -v fzf >/dev/null; then
+    choice=$(for i in "${!lines[@]}"; do printf '%s\t%s\n' "$i" "${lines[$i]}"; done |
+      fzf --delimiter=$'\t' --with-nth=2 --tiebreak=index --reverse --height=40% --prompt='session> ') || exit 0
+    i=${choice%%$'\t'*}
+  else
+    local line
+    PS3="session> "
+    select line in "${lines[@]}"; do
+      [[ -n "$line" ]] && { i=$((REPLY - 1)); break; }
+    done
+    [[ -n "$i" ]] || exit 0
+  fi
+
+  target=${targets[$i]}
+  case ${actions[$i]} in
+    attach) exec claude attach "$target" ;;
+    open) echo "Already open in another terminal (pid $target)." ;;
+    resume)
+      if [[ "${dirs_in[$i]}" != - ]]; then
+        cd "${dirs_in[$i]}"
+        note "resuming ${target:0:8} in ${dirs_in[$i]}"
+        exec claude --resume "$target"
+      fi
+      mapfile -t wts < <(session_worktrees "$target")
+      local -a dirs=()
+      local wt
+      for wt in "${wts[@]:1}"; do
+        [[ -d "$wt" ]] && dirs+=(--add-dir "$wt")
+      done
+      cd "${wts[0]}"
+      note "resuming ${target:0:8} in ${wts[0]}"
+      exec claude --resume "$target" "${dirs[@]}"
+      ;;
+  esac
+}
+
 main() {
   local background=auto do_fetch=auto force_new=no
   while [[ $# -gt 0 && "$1" == --* ]]; do
@@ -387,6 +504,7 @@ main() {
   case "${1:-}" in
     "" | help | -h) usage 0 ;;
     list) cmd_list; return ;;
+    pick) cmd_pick; return ;;
     repos) cmd_repos; return ;;
   esac
 
