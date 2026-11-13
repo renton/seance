@@ -508,13 +508,12 @@ main() {
     repos) cmd_repos; return ;;
   esac
 
-  # Run from a terminal by a person: fetch and open the session here.
-  # Run by Claude (no terminal): never touch the remote, and start in the background.
+  # Run from a terminal by a person: open the session here.
+  # Run by Claude (no terminal): start it in the background.
+  [[ "$do_fetch" == auto ]] && do_fetch=yes
   if is_terminal; then
-    [[ "$do_fetch" == auto ]] && do_fetch=yes
     [[ "$background" == auto ]] && background=no
   else
-    do_fetch=no
     background=yes
   fi
 

@@ -187,10 +187,12 @@ The menu uses [fzf](https://github.com/junegunn/fzf) when it is installed (type 
 
 | | From your terminal | From inside a Claude session |
 |---|---|---|
-| Fetch the base branch | yes (`--no-fetch` skips it) | never |
+| Fetch the base branch | yes (`--no-fetch` skips it) | yes (`--no-fetch` skips it) |
 | Session | opens here, interactive (`--bg` for background) | starts in the background; `claude attach <id>` opens it |
 
-When there is no terminal (Claude running it through its shell tool) seance never contacts the remote and always starts the session in the background.
+When there is no terminal (Claude running it through its shell tool) seance always starts the session in the background.
+
+The fetch only updates `origin/<base>`, and only when a new branch is made. seance never merges, pulls or pushes, and never touches your local base branch, so the state of the repo folder does not matter.
 
 ### Clean up after a merge
 
