@@ -451,6 +451,11 @@ thead th:last-child, tbody td:last-child { padding-right: 18px; }
   white-space: nowrap;
 }
 
+button.repo-badge { font-family: var(--sans); cursor: pointer; transition: box-shadow 120ms, filter 120ms; }
+button.repo-badge:hover { filter: saturate(1.4) brightness(0.97); box-shadow: 0 0 0 2px hsl(var(--h) 60% 75% / 0.6); }
+button.repo-badge:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
+button.repo-badge.active { box-shadow: 0 0 0 2px hsl(var(--h) 60% 50%); }
+
 .repo-badge.small { height: 18px; padding: 0 6px; font-size: 11px; border-radius: 5px; }
 .repo-badge.big { height: 26px; padding: 0 10px; font-size: 13.5px; border-radius: 7px; }
 .repos .repo-badge:not(.main) { opacity: 0.85; }

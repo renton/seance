@@ -59,6 +59,24 @@ function hued(node, name) {
 }
 
 const repoBadge = (name, cls = '') => hued(el('span', { class: `repo-badge ${cls}`.trim(), text: name }), name);
+
+// A repo badge that filters the view to its repo, or clears that filter if it is already on.
+function repoFilterBadge(name, cls = '') {
+  const on = view.repo === name;
+  return hued(el('button', {
+    type: 'button',
+    class: `repo-badge filter ${cls}${on ? ' active' : ''}`.trim(),
+    title: on ? 'Show all repos' : `Show only ${name}`,
+    'aria-pressed': on ? 'true' : 'false',
+    text: name,
+    onclick: (e) => {
+      e.stopPropagation();
+      view.repo = on ? '' : name;
+      save();
+      render();
+    },
+  }), name);
+}
 const repoDot = (name) => hued(el('span', { class: 'repo-dot', 'aria-hidden': 'true' }), name);
 
 const tilde = (p) => (home && p && p.startsWith(home + '/') ? '~' + p.slice(home.length) : p);
@@ -271,7 +289,7 @@ function renderRow(r) {
       r.branch && el('code', { class: 'branch', title: r.branch, text: r.branch }),
     )),
     el('td', {}, el('div', { class: 'repos' },
-      r.repos.map((name, i) => repoBadge(name, i === 0 ? 'main' : '')),
+      r.repos.map((name, i) => repoFilterBadge(name, i === 0 ? 'main' : '')),
     )),
     el('td', {}, s
       ? el('div', { class: 'session' },
@@ -446,7 +464,7 @@ function cardSession(r, repoName) {
         el('span', { class: 'session-name', text: s.name || '(unnamed)' }),
         el('span', { class: 'session-sub' },
           el('code', { class: 'id', title: s.session_id, text: s.short_id }),
-          others.length > 0 && el('span', { class: 'also', title: 'Also works in these repos' }, '+', others.map((name) => repoBadge(name, 'small'))),
+          others.length > 0 && el('span', { class: 'also', title: 'Also works in these repos' }, '+', others.map((name) => repoFilterBadge(name, 'small'))),
           s.forked_from && el('span', { text: `fork of ${s.forked_from.slice(0, 8)}` }),
           !s.from_seance && el('span', { text: 'not from seance' }),
           r.started && el('span', { title: new Date(Date.parse(r.started)).toLocaleString(), text: ago(r.started) }),
