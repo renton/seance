@@ -93,7 +93,7 @@ ipcMain.handle('seance:open', async (_event, sessionId) => {
 // Start (or resume) a session for a ticket or a plain name across the chosen repos, the
 // first being where it runs: seance [--no-jira] <repo>,<repo2> <name>.
 ipcMain.handle('seance:create', async (_event, request) => {
-  const { name, jira, repos, fork, base } = request || {};
+  const { name, jira, repos, fork, base, title } = request || {};
   if (typeof name !== 'string' || typeof jira !== 'boolean' || !Array.isArray(repos)) {
     return { ok: false, message: 'malformed request' };
   }
@@ -125,8 +125,15 @@ ipcMain.handle('seance:create', async (_event, request) => {
     if (!ok) return { ok: false, message: `"${base}" is not a branch name` };
     baseArgs = ['--base', branch];
   }
+  let titleArgs = [];
+  if (title !== undefined) {
+    if (typeof title !== 'string' || !/[A-Za-z0-9]/.test(title) || title.length > 200) {
+      return { ok: false, message: 'A title needs a few words' };
+    }
+    titleArgs = ['--title', title.trim()];
+  }
   const ticket = jira ? name.toUpperCase() : name;
-  const args = [...baseArgs, ...(jira ? [] : ['--no-jira']), repos.join(','), ticket, ...(fork ? [fork] : [])];
+  const args = [...titleArgs, ...baseArgs, ...(jira ? [] : ['--no-jira']), repos.join(','), ticket, ...(fork ? [fork] : [])];
   return seanceInTerminal(`${repos[0]}-${ticket}`, args);
 });
 
