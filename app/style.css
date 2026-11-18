@@ -197,6 +197,14 @@ code { font-family: var(--mono); }
 
 .updated { margin-left: auto; color: var(--text-3); font-size: 12px; white-space: nowrap; }
 
+.btn.refresh { flex: none; color: var(--text-2); }
+.btn.refresh svg { stroke-width: 1.6; }
+.btn.refresh:hover:not(:disabled) svg { transform: rotate(-30deg); }
+.btn.refresh svg { transition: transform 200ms; }
+.btn.refresh.spinning svg { animation: spin 450ms linear infinite; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
 /* Toolbar: status chips and repo filter */
 
 .toolbar {

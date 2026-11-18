@@ -822,5 +822,24 @@ document.addEventListener('keydown', (e) => {
   }
 });
 window.addEventListener('focus', refresh);
+
+// Refresh now: the button at the top right, or F5.
+async function refreshNow() {
+  const button = $('refresh');
+  if (button.classList.contains('spinning')) return;
+  button.classList.add('spinning');
+  const started = Date.now();
+  await refresh();
+  // Keep the spin visible long enough to register, even when seance answers at once.
+  setTimeout(() => button.classList.remove('spinning'), Math.max(0, 450 - (Date.now() - started)));
+}
+
+$('refresh').addEventListener('click', refreshNow);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'F5') {
+    e.preventDefault();
+    refreshNow();
+  }
+});
 setInterval(refresh, REFRESH_MS);
 refresh();

@@ -2,7 +2,7 @@
 
 A window onto `seance list`: every Claude session and ticket worktree in one sortable, filterable table, with buttons to attach to, resume, fork, rename, hide and start sessions. Sessions open in their own terminal window, as if you had typed the `seance` command yourself.
 
-The app keeps no data of its own. It runs `seance list --json` every few seconds (and whenever the window gets focus), and does everything through `seance`, so it always shows the same thing the command line does.
+The app keeps no data of its own. It runs `seance list --json` every few seconds, whenever the window gets focus, and when you click the refresh button at the top right (or press F5), and does everything through `seance`, so it always shows the same thing the command line does.
 
 - [Setup](#setup)
 - [Using it](#using-it)
@@ -141,6 +141,7 @@ The dialog shows the exact `seance` command it will run. **Create** opens a term
 | `/` | focus the search |
 | `Esc` | clear the search, or close a dialog |
 | `n` | New session |
+| `F5` | refresh now (the button at the top right does the same) |
 | Enter | in a dialog, Create, Fork or Rename |
 | `Ctrl+R` | reload the page (after an update to the app's page files) |
 
