@@ -466,7 +466,9 @@ resume_session() {
   fi
   local -a dirs=() words=() named=()
   mapfile -d '' dirs < <(extra_dirs "$sid")
-  [[ -z "$extra" ]] || words=("$extra")
+  # --add-dir takes any number of folders, so a prompt after it would be read as one more:
+  # -- ends the options before the prompt.
+  [[ -z "$extra" ]] || words=(-- "$extra")
   mapfile -t named < <(name_args "$sid")
   cd "${WORKTREES[0]}"
   if [[ "$background" == yes ]]; then
@@ -498,7 +500,7 @@ start_session() {
   cd "${WORKTREES[0]}"
 
   if [[ "$background" == yes ]]; then
-    out=$(claude --bg "${args[@]}" "$prompt" 2>&1 | grep -v 'blocked by enterprise policy') || {
+    out=$(claude --bg "${args[@]}" -- "$prompt" 2>&1 | grep -v 'blocked by enterprise policy') || {
       echo "$out" >&2
       die "claude --bg failed"
     }
@@ -520,7 +522,7 @@ start_session() {
   sid=$(cat /proc/sys/kernel/random/uuid)
   record_all "$ticket" "${REPO_NAMES[0]}-$ticket" "$sid" "${source:--}"
   [[ -z "$TITLE_SLUG" ]] || record_title "$sid" "$TITLE_SLUG"
-  exec claude "${args[@]}" --session-id "$sid" "$prompt"
+  exec claude "${args[@]}" --session-id "$sid" -- "$prompt"
 }
 
 # Add repos' worktrees to the session this runs in, for the ticket that session works on.
