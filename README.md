@@ -79,6 +79,7 @@ seance <repo> <TICKET>                 session on the ticket's branch (resumes i
 seance <repo> <TICKET> <session-id>    fork that session onto the ticket's branch
 seance <repo> <TICKET> here            fork the session this runs inside
 seance <repo>,<repo2> <TICKET> ...     a worktree in each repo, one session across them
+seance <repo> <TICKET> [...] "<prompt>"  your own first prompt instead of "get oriented and wait"
 seance add <repo>[,<repo2>] [<TICKET>] inside a session: add repos' worktrees for its ticket
 seance list                            repos, worktrees, branches and sessions
 seance pick                            choose a session from a menu and attach to or resume it
@@ -149,6 +150,16 @@ It works out the ticket from the session's own worktree (or give it: `seance add
 Every repo in a list is checked against the lookup table before any worktree is made, so a typo leaves nothing half-done. That last step is yours: Claude cannot run slash commands in its own session.
 
 For a large, separable change in another repo, a second session can suit better: `seance web-app PROJ-123 here` forks the conversation into that repo's worktree.
+
+### Give the session your own prompt
+
+```
+seance my-service PROJ-123 "pull the ticket and start working on it, make a plan"
+seance my-service PROJ-124 here "pick up where we left off on PROJ-124"
+seance -n my-service fix-ci-cache "find out why the cache step misses"
+```
+
+A last argument that is not a session id (`here`, a full id, or the 8-character one `seance list` shows) is your prompt. Quote it. It replaces the default "get oriented and wait" steps: the session is still told its ticket and how to read it (read-only), its worktrees, and your repo notes, then given your words. On a resume your prompt is sent as the next message; if the session is already running, it is not sent and seance says so.
 
 ### Work with no ticket
 

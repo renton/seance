@@ -5,6 +5,7 @@
 #   seance <repo> <TICKET> <session-id>    fork that session onto the ticket's branch
 #   seance <repo> <TICKET> here            fork the session this runs inside
 #   seance <repo>,<repo2> <TICKET> ...     a worktree in each repo, one session across them
+#   seance <repo> <TICKET> [...] "<prompt>"  your own first prompt instead of "get oriented and wait"
 #   seance add <repo>[,<repo2>] [<TICKET>] inside a session: add repos' worktrees for its ticket
 #   seance list                            repos, worktrees, branches and sessions
 #   seance pick                            choose a session from a menu and attach to or resume it
@@ -60,6 +61,9 @@ usage() {
 is_terminal() { [[ -t 0 && -t 1 ]]; }
 
 is_jira_key() { [[ "$1" =~ ^[A-Z][A-Z0-9]+-[0-9]+$ ]]; }
+
+# A session to fork: here, a session id, or its first 8 characters as seance list shows them.
+is_session_ref() { [[ "$1" == here || "$1" =~ ^[0-9a-f]{8}(-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$ ]]; }
 
 # The name for the worktree and branch: a Jira key (uppercased), or with --no-jira any plain name.
 # A plain name given without --no-jira is accepted when the first repo already has its worktree.
@@ -228,6 +232,32 @@ Do not write an implementation plan and do not change anything. I will say what 
 EOF
 }
 
+# The first prompt when I give my own: the facts of the session, then my words in place of the default steps.
+custom_prompt() {
+  local ticket=$1 source=$2 extra=$3 notes
+  if [[ -n "$source" ]]; then
+    echo "This session is a fork of $source, moving on to $ticket."
+  else
+    echo "This session is for $ticket."
+  fi
+  echo
+  if [[ "$JIRA" == yes ]]; then
+    echo "$ticket is a Jira ticket: read $(ticket_source "$ticket"). Read-only: do not comment on, edit or transition it."
+  else
+    echo "$ticket is not a Jira ticket: there is nothing to look up."
+  fi
+  echo
+  local paths="never in the repo folders themselves"
+  [[ -z "$source" ]] || paths+=", even where earlier messages name other paths"
+  echo "These git worktrees were made for it, one per repo. Read and change files only in them, $paths. Your working directory is the first."
+  worktree_lines
+  if [[ -z "$source" ]]; then
+    notes=$(notes_files)
+    [[ -n "$notes" ]] && printf '\nNotes on these repos and how they connect to each other (they may be out of date):\n%s\n' "$notes"
+  fi
+  printf '\n%s\n' "$extra"
+}
+
 fork_prompt() {
   local ticket=$1 source=$2
   if [[ "$JIRA" == no ]]; then
@@ -276,7 +306,7 @@ last_session_for() {
 }
 
 resume_session() {
-  local sid=$1 background=$2 live kind
+  local sid=$1 background=$2 extra=$3 live kind
   live=$(claude agents --json 2>/dev/null | jq -c --arg sid "$sid" '.[] | select(.sessionId == $sid)' | head -1)
   if [[ -n "$live" ]]; then
     kind=$(jq -r .kind <<<"$live")
@@ -285,32 +315,36 @@ resume_session() {
     else
       echo "Already open in another terminal (pid $(jq -r .pid <<<"$live"))."
     fi
+    [[ -z "$extra" ]] || note "your prompt was not sent; type it in the session"
     return
   fi
-  local -a dirs=()
+  local -a dirs=() words=()
   mapfile -d '' dirs < <(extra_dirs)
+  [[ -z "$extra" ]] || words=("$extra")
   cd "${WORKTREES[0]}"
   if [[ "$background" == yes ]]; then
-    claude --bg --resume "$sid" "${dirs[@]}" 2>&1 | grep -v 'blocked by enterprise policy'
+    claude --bg --resume "$sid" "${dirs[@]}" "${words[@]}" 2>&1 | grep -v 'blocked by enterprise policy'
     return
   fi
   note "resuming ${sid:0:8} (seance --new starts a fresh session instead)"
-  exec claude --resume "$sid" "${dirs[@]}"
+  exec claude --resume "$sid" "${dirs[@]}" "${words[@]}"
 }
 
 start_session() {
-  local ticket=$1 source=$2 background=$3
+  local ticket=$1 source=$2 background=$3 extra=$4
   local name="${REPO_NAMES[0]}-$ticket" prompt sid out short
   local -a args=(-n "$name") dirs=()
   mapfile -d '' dirs < <(extra_dirs)
   args+=("${dirs[@]}")
 
-  if [[ -n "$source" ]]; then
+  if [[ -n "$extra" ]]; then
+    prompt=$(custom_prompt "$ticket" "$source" "$extra")
+  elif [[ -n "$source" ]]; then
     prompt=$(fork_prompt "$ticket" "$source")
-    args+=(--resume "$source" --fork-session)
   else
     prompt=$(new_prompt "$ticket")
   fi
+  [[ -z "$source" ]] || args+=(--resume "$source" --fork-session)
 
   cd "${WORKTREES[0]}"
 
@@ -594,9 +628,20 @@ main() {
     return
   fi
 
-  [[ $# -ge 2 && $# -le 3 ]] || usage 1
-  local repos=$1 ticket source=${3:-}
+  [[ $# -ge 2 && $# -le 4 ]] || usage 1
+  local repos=$1 ticket source="" extra=""
   ticket=$(work_name "$2" "$no_jira" "${repos%%,*}")
+  shift 2
+  if [[ $# -gt 0 ]] && is_session_ref "$1"; then
+    source=$1
+    shift
+  fi
+  if [[ $# -gt 0 ]]; then
+    extra=$1
+    shift
+  fi
+  [[ $# -eq 0 ]] || die "'$1': the prompt goes last, after any session id (quote it if it has spaces)"
+  [[ "$extra" != -* ]] || die "options go before the arguments ('$extra')"
   JIRA=yes
   if [[ "$no_jira" == yes ]] || ! is_jira_key "$ticket"; then
     JIRA=no
@@ -612,10 +657,10 @@ main() {
   local previous
   previous=$(last_session_for "${WORKTREES[0]}")
   if [[ -z "$source" && "$force_new" == no && -n "$previous" ]]; then
-    resume_session "$previous" "$background"
+    resume_session "$previous" "$background" "$extra"
     return
   fi
-  start_session "$ticket" "$source" "$background"
+  start_session "$ticket" "$source" "$background" "$extra"
 }
 
 main "$@"
