@@ -293,7 +293,9 @@ function renderRow(r) {
     )),
     el('td', {}, s
       ? el('div', { class: 'session' },
-          el('span', { class: 'session-name', title: s.name, text: s.name || '(unnamed)' }),
+          el('span', { class: 'name-line' },
+            el('span', { class: 'session-name', title: s.name, text: s.name || '(unnamed)' }),
+            renameButton(s)),
           el('span', { class: 'session-sub' },
             el('code', { class: 'id', title: s.session_id, text: s.short_id }),
             s.forked_from && el('span', { text: `fork of ${s.forked_from.slice(0, 8)}` }),
@@ -461,7 +463,9 @@ function cardSession(r, repoName) {
     el('div', { class: 'card-session-main' },
       statusCell(r.status),
       el('div', { class: 'session' },
-        el('span', { class: 'session-name', text: s.name || '(unnamed)' }),
+        el('span', { class: 'name-line' },
+          el('span', { class: 'session-name', title: s.name, text: s.name || '(unnamed)' }),
+          renameButton(s)),
         el('span', { class: 'session-sub' },
           el('code', { class: 'id', title: s.session_id, text: s.short_id }),
           others.length > 0 && el('span', { class: 'also', title: 'Also works in these repos' }, '+', others.map((name) => repoFilterBadge(name, 'small'))),
@@ -524,6 +528,83 @@ $('reset').addEventListener('click', () => {
   save();
   render();
 });
+// Renaming: a pencil by each seance session's name opens a dialog for the few words that
+// end its name, saved with seance title.
+
+const renameDialog = $('rename');
+const renameWords = $('rename-words');
+let renaming = null;
+
+// The same rule seance applies: lowercase, hyphens, at most five words and 40 characters.
+function slugify(words) {
+  return words.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    .split('-').slice(0, 5).join('-').slice(0, 40).replace(/-+$/, '');
+}
+
+function renameButton(s) {
+  if (!s.from_seance) return null;
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(ns, 'path');
+  path.setAttribute('d', 'M10.5 2.5l3 3L6 13l-3.5.5L3 10z');
+  svg.append(path);
+  return el('button', {
+    type: 'button',
+    class: 'rename',
+    title: 'Rename this session',
+    'aria-label': `Rename ${s.name}`,
+    onclick: (e) => { e.stopPropagation(); openRename(s); },
+  }, svg);
+}
+
+function namePrefix(s) {
+  return `${s.repos[0]}-${s.ticket}-`;
+}
+
+function updateRename() {
+  const slug = slugify(renameWords.value);
+  $('rename-preview').textContent = namePrefix(renaming) + (slug || '<words>');
+  $('rename-submit').disabled = !slug;
+  const hint = $('rename-hint');
+  hint.classList.remove('error');
+  hint.textContent = renameWords.value.trim() && slug.split('-').length >= 5 && renameWords.value.trim().split(/[^A-Za-z0-9]+/).filter(Boolean).length > 5
+    ? 'Only the first five words are kept.'
+    : '';
+}
+
+function openRename(s) {
+  if (renameDialog.open || dialog.open) return;
+  renaming = s;
+  renameWords.value = s.title ? s.title.replace(/-/g, ' ') : '';
+  updateRename();
+  renameDialog.showModal();
+  renameWords.focus();
+  renameWords.select();
+}
+
+renameWords.addEventListener('input', updateRename);
+$('rename-cancel').addEventListener('click', () => renameDialog.close());
+renameDialog.addEventListener('click', (e) => { if (e.target === renameDialog) renameDialog.close(); });
+$('rename-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const button = $('rename-submit');
+  if (button.disabled || !renaming) return;
+  button.disabled = true;
+  const result = await window.seance.title({ sessionId: renaming.session_id, words: renameWords.value });
+  button.disabled = false;
+  if (result.ok) {
+    renameDialog.close();
+    toast(`Renamed to ${namePrefix(renaming)}${slugify(renameWords.value)}`);
+    refresh();
+  } else {
+    const hint = $('rename-hint');
+    hint.textContent = result.message;
+    hint.classList.add('error');
+  }
+});
+
 // The New session dialog.
 
 const dialog = $('create');
@@ -645,7 +726,7 @@ $('create-form').addEventListener('submit', async (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (dialog.open) return;
+  if (dialog.open || renameDialog.open) return;
   const typing = ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName);
   if (e.key === 'n' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
     e.preventDefault();

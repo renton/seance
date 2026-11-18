@@ -18,8 +18,22 @@ const PLAIN_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const HOLD_ON_ERROR =
   'bin="$1"; shift; "$bin" "$@" || { status=$?; printf "\\nseance exited with status %s. Press Enter to close." "$status"; read _; }';
 
+// Terminator hands a new window to an instance that is already running over D-Bus, and
+// on the way splits the command on spaces, which breaks the sh -c script above. -u starts
+// a separate Terminator that runs the command exactly as given.
+const TERMINAL_OPTIONS = path.basename(TERMINAL) === 'terminator' ? ['-u'] : [];
+
 function seanceInTerminal(title, args) {
-  return launch(TERMINAL, ['-T', title, '-x', 'sh', '-c', HOLD_ON_ERROR, 'seance-app', SEANCE, ...args]);
+  return launch(TERMINAL, [...TERMINAL_OPTIONS, '-T', title, '-x', 'sh', '-c', HOLD_ON_ERROR, 'seance-app', SEANCE, ...args]);
+}
+
+function runSeance(args) {
+  return new Promise((resolve) => {
+    execFile(SEANCE, args, (err, stdout, stderr) => {
+      if (err) resolve({ ok: false, message: (stderr || '').replace(/^seance: /gm, '').trim() || err.message });
+      else resolve({ ok: true, message: stdout.trim() });
+    });
+  });
 }
 
 function seanceList() {
@@ -124,6 +138,23 @@ ipcMain.handle('seance:link', async (_event, url) => {
   }
   await shell.openExternal(url);
   return { ok: true };
+});
+
+// Name a seance session <repo>-<ticket>-<words>: seance title <session-id> "<words>".
+ipcMain.handle('seance:title', async (_event, request) => {
+  const { sessionId, words } = request || {};
+  if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) return { ok: false, message: 'not a session id' };
+  if (typeof words !== 'string' || !words.trim() || words.length > 200) return { ok: false, message: 'Give a few words' };
+  let data;
+  try {
+    data = await seanceList();
+  } catch (err) {
+    return { ok: false, message: err.message };
+  }
+  const session = data.sessions.find((s) => s.session_id === sessionId);
+  if (!session) return { ok: false, message: 'that session is gone; the list will refresh' };
+  if (!session.from_seance) return { ok: false, message: 'Only sessions seance started can be named' };
+  return runSeance(['title', sessionId, words.trim()]);
 });
 
 function createWindow() {

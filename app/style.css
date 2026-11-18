@@ -397,7 +397,7 @@ thead th:last-child, tbody td:last-child { padding-right: 18px; }
 }
 
 .session { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.session-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 250px; }
+.session-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 330px; }
 .session-sub { display: flex; gap: 10px; color: var(--text-3); font-size: 11.5px; }
 .id { color: var(--text-3); }
 
@@ -433,6 +433,33 @@ thead th:last-child, tbody td:last-child { padding-right: 18px; }
 
 .btn.primary:hover:not(:disabled) { color: #fff; filter: brightness(1.08); border-color: transparent; }
 .btn.busy { opacity: 0.7; cursor: progress; }
+
+/* Session names and renaming */
+
+.name-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
+
+.rename {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms, background 120ms, color 120ms;
+}
+
+.rename svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+tr:hover .rename, .card-session:hover .rename, .rename:focus-visible { opacity: 1; }
+.rename:hover { background: var(--accent-soft); color: var(--accent); }
+.rename:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
+
+.dialog.narrow { width: min(460px, calc(100vw - 32px)); }
 
 /* Repo colours: --h is a hue set per repo from a hash of its name */
 
@@ -634,7 +661,7 @@ button.repo-badge.active { box-shadow: 0 0 0 2px hsl(var(--h) 60% 50%); }
 @keyframes rise { from { opacity: 0; transform: translateY(10px) scale(0.98); } }
 
 .dialog[open] { display: flex; }
-.dialog form { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 16px; padding: 22px 24px 20px; }
+.dialog form { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 16px; padding: 22px 24px 20px; }
 .dialog form > * { flex: none; }
 .dialog form > .field-repos { flex: 1 1 auto; min-height: 0; }
 .field > :not(.repo-list) { flex-shrink: 0; }
@@ -800,7 +827,7 @@ input:focus-visible + .box { box-shadow: 0 0 0 4px var(--accent-ring); }
 }
 
 .command-label { color: var(--text-3); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; }
-.command code { color: var(--accent); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.command code { min-width: 0; color: var(--accent); font-size: 12.5px; overflow-wrap: anywhere; }
 
 .dialog-foot { display: flex; justify-content: flex-end; gap: 10px; padding-top: 4px; }
 .dialog-foot .btn { height: 36px; min-width: 96px; }

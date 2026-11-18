@@ -120,6 +120,28 @@
     </form>
   </dialog>
 
+  <dialog id="rename" class="dialog narrow" aria-labelledby="rename-title">
+    <form id="rename-form" method="dialog" novalidate>
+      <header class="dialog-head">
+        <h2 id="rename-title">Rename session</h2>
+        <p>A few words on what the work is. They become the end of the session's name.</p>
+      </header>
+      <div class="field">
+        <label for="rename-words">Words</label>
+        <input id="rename-words" type="text" placeholder="rotate demo lb certs" autocomplete="off" spellcheck="false">
+        <div id="rename-hint" class="hint"></div>
+      </div>
+      <div class="command">
+        <span class="command-label">Name</span>
+        <code id="rename-preview"></code>
+      </div>
+      <footer class="dialog-foot">
+        <button type="button" id="rename-cancel" class="btn">Cancel</button>
+        <button type="submit" id="rename-submit" class="btn primary">Rename</button>
+      </footer>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" role="status" hidden></div>
   <script src="renderer.js"></script>
 </body>

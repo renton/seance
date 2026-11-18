@@ -7,5 +7,6 @@ contextBridge.exposeInMainWorld('seance', {
   list: () => ipcRenderer.invoke('seance:list'),
   open: (sessionId) => ipcRenderer.invoke('seance:open', sessionId),
   create: (request) => ipcRenderer.invoke('seance:create', request),
+  title: (request) => ipcRenderer.invoke('seance:title', request),
   openLink: (url) => ipcRenderer.invoke('seance:link', url),
 });
