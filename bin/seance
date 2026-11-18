@@ -11,6 +11,7 @@
 #   seance list --json                     the same as JSON, for other tools
 #   seance pick                            choose a session from a menu and attach to or resume it
 #   seance open <session-id>               attach to or resume that session, as pick would
+#   seance title [<session-id>] "<words>"  name a session <repo>-<ticket>-<words> (inside one, it names itself)
 #   seance repos                           the lookup table
 #   seance --no-jira <repo> <name> ...     the same for work with no ticket: any name, nothing read from Jira
 #
@@ -29,6 +30,7 @@ set -euo pipefail
 SEANCE_HOME="${SEANCE_HOME:-$HOME/.seance}"
 REPOS_FILE="$SEANCE_HOME/repos"
 SESSIONS_FILE="$SEANCE_HOME/sessions.tsv"
+TITLES_FILE="$SEANCE_HOME/titles.tsv"
 WORKTREE_DIR=".claude/worktrees"
 BRANCH_FORMAT="${SEANCE_BRANCH_FORMAT:-}"
 [[ -n "$BRANCH_FORMAT" ]] || BRANCH_FORMAT='feature/{ticket}'
@@ -198,6 +200,11 @@ notes_files() {
   return 0
 }
 
+# How a session names itself: seance title stores a few words, shown as <repo>-<ticket>-<words>.
+title_instruction() {
+  echo 'name this session by running: seance title "<three to five words on what the work is>", for example seance title "rotate demo lb certs". It only records the name (seance shows it as <repo>-<ticket>-<words>) and changes nothing in the repos.'
+}
+
 new_prompt() {
   local ticket=$1 notes orient
   notes=$(notes_files)
@@ -215,6 +222,7 @@ $(worktree_lines)
 
 $orient
 Then tell me briefly what you found, and stop. Do not change anything until I say what the work is.
+When I have described the work, $(title_instruction)
 EOF
     return
   fi
@@ -230,6 +238,7 @@ Get oriented, then stop and wait for me:
 3. Restate the acceptance criteria in your own words and flag anything ambiguous, underspecified or with a hidden dependency.
 4. Name every repo the ticket touches, and say if it needs one that has no worktree above.
 5. Look through the code in these worktrees until you know where the work lives, and tell me briefly.
+6. Once you know what the ticket is about, $(title_instruction)
 Do not write an implementation plan and do not change anything. I will say what to do next.
 EOF
 }
@@ -257,6 +266,7 @@ custom_prompt() {
     notes=$(notes_files)
     [[ -n "$notes" ]] && printf '\nNotes on these repos and how they connect to each other (they may be out of date):\n%s\n' "$notes"
   fi
+  printf '\nOnce you know what the work is about, %s\n' "$(title_instruction)"
   printf '\n%s\n' "$extra"
 }
 
@@ -269,7 +279,7 @@ This session is a fork of $source, moving on to $ticket. This is not a Jira tick
 These git worktrees were made for it, one per repo. Read and change files only in them, even where earlier messages name other paths. Your working directory is now the first.
 $(worktree_lines)
 
-Do not change anything until I say what the work is.
+Do not change anything until I say what the work is. When I have described it, $(title_instruction)
 EOF
     return
   fi
@@ -284,6 +294,7 @@ Get oriented on the new ticket, using what we already know about these repos rat
 2. Restate the acceptance criteria in your own words and flag anything ambiguous, underspecified or with a hidden dependency.
 3. Name every repo the ticket touches, and say if it needs one that has no worktree above.
 4. Say briefly where the work lives in the code, looking further only where this ticket goes beyond what we have covered.
+5. Once you know what the new ticket is about, $(title_instruction)
 Do not write an implementation plan and do not change anything. I will say what to do next.
 EOF
 }
@@ -303,6 +314,53 @@ record_all() {
   done
 }
 
+# The few words a session named itself with (the latest wins), or nothing.
+session_title() {
+  awk -F'\t' -v sid="$1" '$1 == sid { t = $2 } END { print t }' "$TITLES_FILE" 2>/dev/null || true
+}
+
+# <repo>-<ticket>-<words> for a titled seance session, from its first record; nothing otherwise.
+titled_name() {
+  local title repo="" ticket=""
+  title=$(session_title "$1")
+  [[ -n "$title" ]] || return 0
+  IFS=$'\t' read -r repo ticket < <(awk -F'\t' -v sid="$1" 'NR > 1 && $5 == sid { print $2 "\t" $3; exit }' "$SESSIONS_FILE" 2>/dev/null) || true
+  [[ -z "$repo" ]] || echo "$repo-$ticket-$title"
+}
+
+# -n and the titled name, one per line, for claude --resume; nothing if the session has no title.
+name_args() {
+  local name
+  name=$(titled_name "$1")
+  [[ -z "$name" ]] || printf '%s\n%s\n' -n "$name"
+}
+
+# A few words as lowercase-and-hyphens: at most five words and 40 characters.
+slugify() {
+  tr '[:upper:]' '[:lower:]' <<<"$1" | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -d- -f1-5 | cut -c1-40 | sed -E 's/-+$//'
+}
+
+# Name a seance session: inside one, seance title "<words>"; from anywhere, seance title <session-id> "<words>".
+cmd_title() {
+  local sid words slug full
+  if [[ $# -eq 2 ]]; then
+    sid=$1 words=$2
+  else
+    sid=${CLAUDE_CODE_SESSION_ID:-} words=${1:-}
+    [[ -n "$sid" ]] || die 'outside a Claude session, give the session too: seance title <session-id> "<words>"'
+  fi
+  [[ "$sid" != here ]] && is_session_ref "$sid" || die "'$sid' is not a session id"
+  full=$(awk -F'\t' -v id="$sid" 'NR > 1 && index($5, id) == 1 { print $5 }' "$SESSIONS_FILE" 2>/dev/null | sort -u)
+  [[ -n "$full" ]] || die "no seance session $sid (see: seance list)"
+  [[ $(wc -l <<<"$full") -eq 1 ]] || die "$sid matches more than one session; give the full id"
+  slug=$(slugify "$words")
+  [[ -n "$slug" ]] || die 'give a few words, for example: seance title "rotate demo lb certs"'
+  mkdir -p "$SEANCE_HOME"
+  printf '%s\t%s\t%s\n' "$full" "$slug" "$(date -Iseconds)" >>"$TITLES_FILE"
+  echo "Named ${full:0:8}: $(titled_name "$full")"
+  note "the Claude session itself takes this name the next time seance resumes it"
+}
+
 last_session_for() {
   awk -F'\t' -v wt="$1" 'NR > 1 && $6 == wt { sid = $5 } END { print sid }' "$SESSIONS_FILE" 2>/dev/null || true
 }
@@ -320,16 +378,17 @@ resume_session() {
     [[ -z "$extra" ]] || note "your prompt was not sent; type it in the session"
     return
   fi
-  local -a dirs=() words=()
+  local -a dirs=() words=() named=()
   mapfile -d '' dirs < <(extra_dirs)
   [[ -z "$extra" ]] || words=("$extra")
+  mapfile -t named < <(name_args "$sid")
   cd "${WORKTREES[0]}"
   if [[ "$background" == yes ]]; then
-    claude --bg --resume "$sid" "${dirs[@]}" "${words[@]}" 2>&1 | grep -v 'blocked by enterprise policy'
+    claude --bg --resume "$sid" "${named[@]}" "${dirs[@]}" "${words[@]}" 2>&1 | grep -v 'blocked by enterprise policy'
     return
   fi
   note "resuming ${sid:0:8} (seance --new starts a fresh session instead)"
-  exec claude --resume "$sid" "${dirs[@]}" "${words[@]}"
+  exec claude --resume "$sid" "${named[@]}" "${dirs[@]}" "${words[@]}"
 }
 
 start_session() {
@@ -440,9 +499,10 @@ cmd_repos() {
 
 cmd_list() {
   [[ -f "$REPOS_FILE" ]] || die "no lookup table at $REPOS_FILE"
-  local agents registry
+  local agents registry titles
   agents=$(claude agents --json --all 2>/dev/null || echo '[]')
   registry=$(tail -n +2 "$SESSIONS_FILE" 2>/dev/null || true)
+  titles=$(cat "$TITLES_FILE" 2>/dev/null || true)
 
   local bold="" dim="" reset=""
   if [[ -t 1 ]]; then
@@ -478,9 +538,13 @@ cmd_list() {
       fi
       printf '   %-22s  %s%s\n' "$label" "$branch" "$link"
 
-      jq -r --arg wt "$wt" --arg reg "$registry" --arg dim "$dim" --arg reset "$reset" '
+      jq -r --arg wt "$wt" --arg reg "$registry" --arg titles "$titles" --arg dim "$dim" --arg reset "$reset" '
         ($reg | split("\n") | map(select(length > 0) | split("\t"))) as $rows
-        | ($rows | map(select(.[5] == $wt) | {repo: .[1], ticket: .[2], name: .[3], sid: .[4], forked: .[6]})
+        | ($titles | split("\n") | map(select(length > 0) | split("\t") | {key: .[0], value: .[1]}) | from_entries) as $tmap
+        | ($rows | map(select(.[5] == $wt) | . as $r
+            | ($rows | map(select(.[4] == $r[4])) | first) as $first
+            | {repo: .[1], ticket: .[2], sid: .[4], forked: .[6],
+               name: (if $tmap[$r[4]] then "\($first[1])-\($first[2])-\($tmap[$r[4]])" else .[3] end)})
           | unique_by(.sid)) as $ours
         | (map({key: .sessionId, value: .}) | from_entries) as $live
         | ($ours | map(.sid)) as $ourIds
@@ -522,6 +586,7 @@ cmd_list_json() {
   done < <(repo_names))
 
   jq -n --argjson agents "$agents" --arg reg "$registry" --arg wts "$worktrees" \
+    --arg titles "$(cat "$TITLES_FILE" 2>/dev/null || true)" \
     --arg repos "$(awk '$0 !~ /^[[:space:]]*(#|$)/ { print $1 "\t" $2 "\t" $3 }' "$REPOS_FILE")" \
     --arg wtdir "$WORKTREE_DIR" --arg jira "$JIRA_URL" '
     def lines($s): $s | split("\n") | map(select(length > 0) | split("\t"));
@@ -531,6 +596,7 @@ cmd_list_json() {
     def is_key: . != null and test("^[A-Z][A-Z0-9]+-[0-9]+$");
 
     lines($reg) as $rows
+    | (lines($titles) | map({key: .[0], value: .[1]}) | from_entries) as $tmap
     | (lines($repos) | map({name: .[0], path: (.[1] | rtrimstr("/")), base: (.[2] // "" | nonempty)})) as $repotab
     | (lines($wts) | map({repo: .[0], path: .[1], branch: (.[2] | nonempty)})) as $wtl
     | ($wtl | map(.path)) as $wtpaths
@@ -556,11 +622,16 @@ cmd_list_json() {
       [ $sids[] as $sid
         | ($rows | map(select(.[4] == $sid))) as $mine
         | ($mine | map(.[5]) | uniq) as $wt
-        | session($live[$sid] // null; $sid; $mine[0][3]; ($mine | map(.[1]) | uniq); $mine[0][2];
-                  $wt; $wt[0]; true; $mine[0][6]; $mine[0][0]; ($wt[0] | IN($wtpaths[]))) ]
+        | ($tmap[$sid] // null) as $title
+        | session($live[$sid] // null; $sid;
+                  (if $title then "\($mine[0][1])-\($mine[0][2])-\($title)" else $mine[0][3] end);
+                  ($mine | map(.[1]) | uniq); $mine[0][2];
+                  $wt; $wt[0]; true; $mine[0][6]; $mine[0][0]; ($wt[0] | IN($wtpaths[])))
+        | . + {title: $title} ]
       + [ $agents[] | select(.sessionId | IN($sids[]) | not) | wt_of(.cwd) as $w | select($w != null)
           | session(.; .sessionId; .name; [$w.repo]; ($w.path | ticket_of); [$w.path]; .cwd; false; "-";
-                    (if .startedAt then (.startedAt / 1000 | floor | todate) else null end); true) ]
+                    (if .startedAt then (.startedAt / 1000 | floor | todate) else null end); true)
+          | . + {title: null} ]
     | . as $sessions
 
     | {version: 1, generated: (now | floor | todate),
@@ -650,7 +721,9 @@ act_on() {
       done
       cd "${wts[0]}"
       note "resuming ${target:0:8} in ${wts[0]}"
-      exec claude --resume "$target" "${dirs[@]}"
+      local -a named=()
+      mapfile -t named < <(name_args "$target")
+      exec claude --resume "$target" "${named[@]}" "${dirs[@]}"
       ;;
   esac
 }
@@ -687,6 +760,12 @@ main() {
       return
       ;;
     pick) cmd_pick; return ;;
+    title)
+      [[ $# -ge 2 && $# -le 3 ]] || usage 1
+      shift
+      cmd_title "$@"
+      return
+      ;;
     open)
       [[ $# -eq 2 ]] || usage 1
       cmd_open "$2"

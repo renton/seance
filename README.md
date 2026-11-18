@@ -85,6 +85,7 @@ seance list                            repos, worktrees, branches and sessions
 seance list --json                     the same as JSON, for other tools
 seance pick                            choose a session from a menu and attach to or resume it
 seance open <session-id>               attach to or resume that session, as pick would
+seance title [<session-id>] "<words>"  name a session <repo>-<ticket>-<words> (inside one, it names itself)
 seance repos                           the lookup table
 seance --no-jira <repo> <name> ...     the same for work with no ticket: any name, nothing read from Jira
 seance help
@@ -323,10 +324,11 @@ A launcher does not read `~/.bashrc`, so set `SEANCE_JIRA_URL` (for ticket links
 |---|---|
 | `~/.seance/repos` | the lookup table: `<name> <path> [base branch]` |
 | `~/.seance/sessions.tsv` | every session seance started: created, repo, ticket, name, session id, worktree, forked from |
+| `~/.seance/titles.tsv` | the few words each session named itself with: session id, words, when (the latest wins) |
 
 `SEANCE_HOME` moves both.
 
 ## Notes
 
 - `claude --bg` ignores `--session-id`, so for background sessions seance reads the id back from `claude agents --json`.
-- The session name is `<repo>-<TICKET>`. The ticket is read inside the session, so its summary is not in the name.
+- A session starts as `<repo>-<TICKET>`, because seance does not read the ticket itself. Its first prompt asks it to run `seance title "<a few words>"` once it knows what the work is, which makes it `<repo>-<TICKET>-<words>` (at most five words, lowercased and hyphenated) in `seance list`, `pick`, `--json` and the app at once. Claude's own name for the session (in `claude agents` and its picker) takes the new name the next time seance resumes it, since a running session cannot be renamed from outside. To name an older session, run `seance title <session-id> "<words>"`, or ask the session to run `seance title "<words>"`.
