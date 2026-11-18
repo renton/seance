@@ -79,7 +79,7 @@ ipcMain.handle('seance:open', async (_event, sessionId) => {
 // Start (or resume) a session for a ticket or a plain name across the chosen repos, the
 // first being where it runs: seance [--no-jira] <repo>,<repo2> <name>.
 ipcMain.handle('seance:create', async (_event, request) => {
-  const { name, jira, repos } = request || {};
+  const { name, jira, repos, fork } = request || {};
   if (typeof name !== 'string' || typeof jira !== 'boolean' || !Array.isArray(repos)) {
     return { ok: false, message: 'malformed request' };
   }
@@ -99,8 +99,12 @@ ipcMain.handle('seance:create', async (_event, request) => {
     if (typeof repo !== 'string' || !known.has(repo)) return { ok: false, message: `"${repo}" is not in seance's repo table` };
   }
   if (new Set(repos).size !== repos.length) return { ok: false, message: 'A repo is chosen twice' };
+  if (fork !== undefined) {
+    if (typeof fork !== 'string' || !SESSION_ID.test(fork)) return { ok: false, message: 'not a session id to fork' };
+    if (!data.sessions.some((s) => s.session_id === fork)) return { ok: false, message: 'the session to fork is gone; the list will refresh' };
+  }
   const ticket = jira ? name.toUpperCase() : name;
-  const args = [...(jira ? [] : ['--no-jira']), repos.join(','), ticket];
+  const args = [...(jira ? [] : ['--no-jira']), repos.join(','), ticket, ...(fork ? [fork] : [])];
   return seanceInTerminal(`${repos[0]}-${ticket}`, args);
 });
 
@@ -124,8 +128,10 @@ ipcMain.handle('seance:link', async (_event, url) => {
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 960,
-    height: 760,
+    width: 1280,
+    height: 860,
+    minWidth: 820,
+    minHeight: 520,
     title: 'seance',
     autoHideMenuBar: true,
     webPreferences: {

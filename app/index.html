@@ -72,8 +72,16 @@
     <form id="create-form" method="dialog" novalidate>
       <header class="dialog-head">
         <h2 id="create-title">New session</h2>
-        <p>A worktree and branch in each repo you choose, and a Claude session across them.</p>
+        <p id="create-intro">A worktree and branch in each repo you choose, and a Claude session across them.</p>
       </header>
+
+      <div id="create-source" class="source" hidden>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4" cy="3.5" r="1.75"/><circle cx="12" cy="3.5" r="1.75"/><circle cx="8" cy="12.5" r="1.75"/><path d="M4 5.25v1.5a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-1.5M8 8.75v2"/></svg>
+        <div>
+          <div class="source-label">Forking</div>
+          <div id="create-source-name" class="source-name"></div>
+        </div>
+      </div>
 
       <div class="field">
         <label for="create-name">Ticket or branch name</label>
@@ -90,7 +98,7 @@
         </span>
       </label>
 
-      <div class="field">
+      <div class="field field-repos">
         <div class="field-row">
           <label for="create-repo-search">Repos</label>
           <span class="hint">The first one you tick is where the session runs.</span>

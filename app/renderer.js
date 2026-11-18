@@ -205,7 +205,8 @@ async function create(request, button) {
     button.disabled = false;
   }
   if (result.ok) {
-    toast(`Starting ${request.repos[0]}-${request.jira ? request.name.toUpperCase() : request.name} in a terminal`);
+    const name = `${request.repos[0]}-${request.jira ? request.name.toUpperCase() : request.name}`;
+    toast(request.fork ? `Forking into ${name} in a terminal` : `Starting ${name} in a terminal`);
     refresh();
   }
   return result;
@@ -233,7 +234,32 @@ function actionCell(r) {
     title: canOpen ? `${ACTION_LABEL[s.action]} ${s.name} in a terminal` : why,
   });
   button.addEventListener('click', (e) => { e.stopPropagation(); openSession(s, button); });
-  return button;
+  const fork = el('button', {
+    class: 'btn fork',
+    type: 'button',
+    title: `Fork ${s.name}: a new session that starts with this conversation, on another ticket`,
+    'aria-label': `Fork ${s.name}`,
+  }, forkIcon(), 'Fork');
+  fork.addEventListener('click', (e) => { e.stopPropagation(); openCreate(s); });
+  return el('div', { class: 'actions' }, button, fork);
+}
+
+function forkIcon() {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const [cx, cy] of [[4, 3.5], [12, 3.5], [8, 12.5]]) {
+    const c = document.createElementNS(ns, 'circle');
+    c.setAttribute('cx', cx);
+    c.setAttribute('cy', cy);
+    c.setAttribute('r', '1.75');
+    svg.append(c);
+  }
+  const p = document.createElementNS(ns, 'path');
+  p.setAttribute('d', 'M4 5.25v1.5a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-1.5M8 8.75v2');
+  svg.append(p);
+  return svg;
 }
 
 function renderRow(r) {
@@ -546,22 +572,40 @@ function updateCreate() {
   nameInput.placeholder = jiraBox.checked ? 'PROJ-123' : 'fix-ci-cache';
 
   const shownName = name ? (jiraBox.checked ? name.toUpperCase() : name) : jiraBox.checked ? '<TICKET>' : '<name>';
-  $('create-command').textContent = `seance ${jiraBox.checked ? '' : '-n '}${chosen.length ? chosen.join(',') : '<repos>'} ${shownName}`;
+  $('create-command').textContent = `seance ${jiraBox.checked ? '' : '-n '}${chosen.length ? chosen.join(',') : '<repos>'} ${shownName}${forkSource ? ' ' + forkSource.short_id : ''}`;
   submit.disabled = !name || Boolean(problem) || !chosen.length;
 }
 
-function openCreate() {
+// With a session, the dialog forks it: the new session starts with that conversation.
+let forkSource = null;
+
+function openCreate(source = null) {
   if (!data || dialog.open) return;
+  forkSource = source;
+  $('create-title').textContent = source ? 'Fork session' : 'New session';
+  $('create-intro').textContent = source
+    ? 'A new session that starts with the whole conversation below, in a fresh worktree for another ticket. The original is left as it is.'
+    : 'A worktree and branch in each repo you choose, and a Claude session across them.';
+  $('create-source').hidden = !source;
+  if (source) {
+    $('create-source-name').replaceChildren(
+      el('span', { text: source.name || '(unnamed)' }),
+      el('code', { class: 'id', text: ` ${source.short_id}` }),
+      source.ticket && el('span', { class: 'muted', text: `  from ${source.ticket}` }),
+    );
+  }
+  submit.textContent = source ? 'Fork' : 'Create';
   nameInput.value = '';
   jiraBox.checked = true;
   repoSearch.value = '';
-  chosen = view.repo ? [view.repo] : [];
+  const present = new Set(data.repos.filter((r) => r.present).map((r) => r.name));
+  chosen = source ? source.repos.filter((r) => present.has(r)) : view.repo ? [view.repo] : [];
   renderRepoList();
   dialog.showModal();
   nameInput.focus();
 }
 
-$('new').addEventListener('click', openCreate);
+$('new').addEventListener('click', () => openCreate());
 $('create-cancel').addEventListener('click', () => dialog.close());
 nameInput.addEventListener('input', updateCreate);
 jiraBox.addEventListener('change', updateCreate);
@@ -571,7 +615,9 @@ dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(
 $('create-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (submit.disabled) return;
-  const result = await create({ name: nameInput.value.trim(), jira: jiraBox.checked, repos: chosen }, submit);
+  const request = { name: nameInput.value.trim(), jira: jiraBox.checked, repos: chosen };
+  if (forkSource) request.fork = forkSource.session_id;
+  const result = await create(request, submit);
   if (result.ok) dialog.close();
   else {
     const hint = $('create-name-hint');

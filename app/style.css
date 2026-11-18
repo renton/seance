@@ -62,6 +62,8 @@
 
 * { box-sizing: border-box; }
 
+[hidden] { display: none !important; }
+
 html, body { min-height: 100%; }
 
 body {
@@ -323,7 +325,7 @@ tbody tr.s-stopped .session-name, tbody tr.s-none .ticket { color: var(--text-2)
 thead th:first-child, tbody td:first-child { padding-left: 18px; }
 thead th:last-child, tbody td:last-child { padding-right: 18px; }
 .col-started { width: 92px; white-space: nowrap; }
-.col-action { width: 110px; text-align: right; }
+.col-action { width: 1%; text-align: right; white-space: nowrap; }
 
 .status { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
 
@@ -345,8 +347,28 @@ thead th:last-child, tbody td:last-child { padding-right: 18px; }
 .ticket.link:hover { color: var(--accent-hover); text-decoration: underline; text-underline-offset: 3px; }
 .ext { font-size: 11px; opacity: 0.75; }
 
-.repos { display: flex; align-items: center; gap: 5px; flex-wrap: nowrap; }
-.col-action .small-text { display: inline-block; max-width: 90px; line-height: 1.3; }
+.repos { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.repos .repo-badge:not(.main) { opacity: 1; }
+
+.actions { display: inline-flex; gap: 6px; justify-content: flex-end; }
+
+.btn.fork { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 0 11px; color: var(--text-2); }
+.btn.fork svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+
+.source {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-radius: 10px;
+  background: var(--accent-soft);
+}
+
+.source svg { flex: none; width: 20px; height: 20px; fill: none; stroke: var(--accent); stroke-width: 1.4; }
+.source-label { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+.source-name { font-weight: 600; }
+.col-action .small-text { display: inline-block; max-width: 90px; line-height: 1.3; white-space: normal; }
 .repo-main { white-space: nowrap; }
 
 .chip {
@@ -606,7 +628,11 @@ thead th:last-child, tbody td:last-child { padding-right: 18px; }
 
 @keyframes rise { from { opacity: 0; transform: translateY(10px) scale(0.98); } }
 
-.dialog form { display: flex; flex-direction: column; gap: 16px; padding: 22px 24px 20px; }
+.dialog[open] { display: flex; }
+.dialog form { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 16px; padding: 22px 24px 20px; }
+.dialog form > * { flex: none; }
+.dialog form > .field-repos { flex: 1 1 auto; min-height: 0; }
+.field > :not(.repo-list) { flex-shrink: 0; }
 
 .dialog-head h2 {
   margin: 0;
@@ -726,8 +752,9 @@ input:focus-visible + .box { box-shadow: 0 0 0 4px var(--accent-ring); }
 .picked-x:hover { background: var(--line-strong); color: var(--text); }
 
 .repo-list {
-  max-height: min(220px, calc(100vh - 520px));
-  min-height: 120px;
+  flex: 1 1 auto;
+  max-height: 220px;
+  min-height: 96px;
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 10px;
