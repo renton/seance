@@ -37,6 +37,8 @@ SESSIONS_FILE="$SEANCE_HOME/sessions.tsv"
 TITLES_FILE="$SEANCE_HOME/titles.tsv"
 WORKTREE_DIR=".claude/worktrees"
 BASE_OVERRIDE=""
+TITLE_SLUG=""
+START_NAME=""
 
 # A setting from the environment, else from the config file. The file is read as NAME=value
 # lines, never run; surrounding quotes are dropped and a leading ~/ means the home folder.
@@ -228,8 +230,13 @@ notes_files() {
 }
 
 # How a session names itself: seance title stores a few words, shown as <repo>-<ticket>-<words>.
+# A session started with --title already has its name, so it is only asked to check it.
 title_instruction() {
-  echo 'name this session by running: seance title "<three to five words on what the work is>", for example seance title "rotate demo lb certs". It only records the name (seance shows it as <repo>-<ticket>-<words>) and changes nothing in the repos.'
+  if [[ -n "$TITLE_SLUG" ]]; then
+    echo "check that this session's name, $START_NAME, still fits the work; if it does not, rename it by running: seance title \"<three to five words on what the work is>\". That only records the name and changes nothing in the repos."
+  else
+    echo 'name this session by running: seance title "<three to five words on what the work is>", for example seance title "rotate demo lb certs". It only records the name (seance shows it as <repo>-<ticket>-<words>) and changes nothing in the repos.'
+  fi
 }
 
 new_prompt() {
@@ -326,11 +333,19 @@ Do not write an implementation plan and do not change anything. I will say what 
 EOF
 }
 
+# --add-dir for each folder the session needs besides its working directory (WORKTREES[0]):
+# the other worktrees of this command, every worktree recorded for the session when one is
+# given (so repos added with seance add keep their access on resume), and the notes folder.
 extra_dirs() {
-  local i
-  for i in "${!WORKTREES[@]}"; do
-    ((i == 0)) && continue
-    printf '%s\0%s\0' --add-dir "${WORKTREES[$i]}"
+  local sid=${1:-} dir
+  local -a dirs=("${WORKTREES[@]:1}")
+  local -A seen=(["${WORKTREES[0]}"]=1)
+  [[ -z "$sid" ]] || mapfile -t -O "${#dirs[@]}" dirs < <(session_worktrees "$sid")
+  [[ -z "$NOTES_DIR" ]] || dirs+=("$NOTES_DIR")
+  for dir in "${dirs[@]}"; do
+    [[ -d "$dir" && -z "${seen[$dir]:-}" ]] || continue
+    seen[$dir]=1
+    printf '%s\0%s\0' --add-dir "$dir"
   done
 }
 
@@ -382,10 +397,14 @@ cmd_title() {
   [[ $(wc -l <<<"$full") -eq 1 ]] || die "$sid matches more than one session; give the full id"
   slug=$(slugify "$words")
   [[ -n "$slug" ]] || die 'give a few words, for example: seance title "rotate demo lb certs"'
-  mkdir -p "$SEANCE_HOME"
-  printf '%s\t%s\t%s\n' "$full" "$slug" "$(date -Iseconds)" >>"$TITLES_FILE"
+  record_title "$full" "$slug"
   echo "Named ${full:0:8}: $(titled_name "$full")"
   note "the Claude session itself takes this name the next time seance resumes it"
+}
+
+record_title() {
+  mkdir -p "$SEANCE_HOME"
+  printf '%s\t%s\t%s\n' "$1" "$2" "$(date -Iseconds)" >>"$TITLES_FILE"
 }
 
 last_session_for() {
@@ -406,7 +425,7 @@ resume_session() {
     return
   fi
   local -a dirs=() words=() named=()
-  mapfile -d '' dirs < <(extra_dirs)
+  mapfile -d '' dirs < <(extra_dirs "$sid")
   [[ -z "$extra" ]] || words=("$extra")
   mapfile -t named < <(name_args "$sid")
   cd "${WORKTREES[0]}"
@@ -421,6 +440,8 @@ resume_session() {
 start_session() {
   local ticket=$1 source=$2 background=$3 extra=$4
   local name="${REPO_NAMES[0]}-$ticket" prompt sid out short
+  [[ -z "$TITLE_SLUG" ]] || name+="-$TITLE_SLUG"
+  START_NAME=$name
   local -a args=(-n "$name") dirs=()
   mapfile -d '' dirs < <(extra_dirs)
   args+=("${dirs[@]}")
@@ -449,14 +470,16 @@ start_session() {
       [[ -n "$sid" ]] && break
       sleep 1
     done
-    record_all "$ticket" "$name" "${sid:-$short}" "${source:--}"
+    record_all "$ticket" "${REPO_NAMES[0]}-$ticket" "${sid:-$short}" "${source:--}"
+    [[ -z "$TITLE_SLUG" ]] || record_title "${sid:-$short}" "$TITLE_SLUG"
     echo "Started $name in the background ($short), in ${WORKTREES[0]}"
     echo "  claude attach $short"
     return
   fi
 
   sid=$(cat /proc/sys/kernel/random/uuid)
-  record_all "$ticket" "$name" "$sid" "${source:--}"
+  record_all "$ticket" "${REPO_NAMES[0]}-$ticket" "$sid" "${source:--}"
+  [[ -z "$TITLE_SLUG" ]] || record_title "$sid" "$TITLE_SLUG"
   exec claude "${args[@]}" --session-id "$sid" "$prompt"
 }
 
@@ -730,22 +753,23 @@ cmd_pick() {
 
 # Do a pick row's action: attach to it, say it is open elsewhere, or resume it.
 act_on() {
-  local action=$1 target=$2 dir=$3 wts=() wt
+  local action=$1 target=$2 dir=$3 wts=()
   case $action in
     attach) exec claude attach "$target" ;;
     open) die "already open in another terminal (pid $target)" ;;
     resume)
+      local -a dirs=()
       if [[ "$dir" != - ]]; then
+        WORKTREES=("$dir")
+        mapfile -d '' dirs < <(extra_dirs)
         cd "$dir"
         note "resuming ${target:0:8} in $dir"
-        exec claude --resume "$target"
+        exec claude --resume "$target" "${dirs[@]}"
       fi
       mapfile -t wts < <(session_worktrees "$target")
       [[ ${#wts[@]} -gt 0 && -d "${wts[0]}" ]] || die "session ${target:0:8} has no worktree left to resume in"
-      local -a dirs=()
-      for wt in "${wts[@]:1}"; do
-        [[ -d "$wt" ]] && dirs+=(--add-dir "$wt")
-      done
+      WORKTREES=("${wts[0]}")
+      mapfile -d '' dirs < <(extra_dirs "$target")
       cd "${wts[0]}"
       note "resuming ${target:0:8} in ${wts[0]}"
       local -a named=()
@@ -778,6 +802,16 @@ main() {
         shift
         ;;
       --base=*) BASE_OVERRIDE=${1#--base=} ;;
+      --title)
+        [[ $# -ge 2 ]] || die 'title needs a few words, for example: --title "rotate demo lb certs"'
+        TITLE_SLUG=$(slugify "$2")
+        [[ -n "$TITLE_SLUG" ]] || die 'title needs a few words, for example: --title "rotate demo lb certs"'
+        shift
+        ;;
+      --title=*)
+        TITLE_SLUG=$(slugify "${1#--title=}")
+        [[ -n "$TITLE_SLUG" ]] || die 'title needs a few words, for example: --title="rotate demo lb certs"'
+        ;;
       -n | --no-jira) no_jira=yes ;;
       --new) force_new=yes ;;
       -h | --help) usage 0 ;;
@@ -823,6 +857,7 @@ main() {
   REPO_NAMES=() WORKTREES=() BRANCHES=()
 
   if [[ "$1" == add ]]; then
+    [[ -z "$TITLE_SLUG" ]] || die "--title names a session; seance add does not start one (use seance title)"
     [[ $# -ge 2 && $# -le 3 ]] || usage 1
     cmd_add "$2" "${3:-}" "$do_fetch" "$no_jira"
     return
@@ -857,6 +892,10 @@ main() {
   local previous
   previous=$(last_session_for "${WORKTREES[0]}")
   if [[ -z "$source" && "$force_new" == no && -n "$previous" ]]; then
+    if [[ -n "$TITLE_SLUG" ]]; then
+      record_title "$previous" "$TITLE_SLUG"
+      note "named ${previous:0:8}: $(titled_name "$previous")"
+    fi
     resume_session "$previous" "$background" "$extra"
     return
   fi
