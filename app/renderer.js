@@ -16,7 +16,11 @@ let data = null;
 let home = '';
 let lastJson = '';
 
-const view = { sort: 'status', dir: 1, statuses: [...STATUSES], repo: '', tab: 'table', ...load() };
+const view = { sort: 'status', dir: 1, statuses: [...STATUSES], repo: '', tab: 'table', hidden: [], showHidden: false, ...load() };
+
+// Rows hidden with the eye button, by key (a session id, or a worktree path). Kept only in this
+// app's own storage, like the sort and filters; seance knows nothing about it.
+const isHidden = (r) => view.hidden.includes(r.key);
 
 function load() {
   try {
@@ -170,6 +174,7 @@ function compare(a, b) {
 }
 
 function rowMatches(r, query) {
+  if (isHidden(r) && !view.showHidden) return false;
   if (!view.statuses.includes(r.status)) return false;
   if (view.repo && !r.repos.includes(view.repo)) return false;
   if (!query) return true;
@@ -282,7 +287,7 @@ function forkIcon() {
 
 function renderRow(r) {
   const s = r.session;
-  const tr = el('tr', { class: `row s-${r.status}` },
+  const tr = el('tr', { class: `row s-${r.status}${isHidden(r) ? ' is-hidden' : ''}` },
     el('td', { class: 'col-status' }, statusCell(r.status)),
     el('td', {}, el('div', { class: 'ticket-cell' },
       ticketCell(r),
@@ -304,7 +309,7 @@ function renderRow(r) {
       : el('span', { class: 'muted', text: 'none yet' })),
     el('td', { class: 'col-started', title: r.started ? new Date(Date.parse(r.started)).toLocaleString() : '' },
       el('span', { class: 'muted', text: ago(r.started) })),
-    el('td', { class: 'col-action' }, actionCell(r)),
+    el('td', { class: 'col-action' }, el('div', { class: 'actions' }, actionCell(r), hideButton(r))),
   );
   if (s) tr.addEventListener('dblclick', () => {
     const button = tr.querySelector('button');
@@ -350,7 +355,13 @@ function renderHeaders() {
 
 function render() {
   if (!data) return;
-  const all = buildRows();
+  const every = buildRows();
+  pruneHidden(every);
+  const hiddenCount = every.filter(isHidden).length;
+  $('hidden-count').textContent = String(hiddenCount);
+  $('show-hidden').checked = view.showHidden;
+  $('show-hidden-wrap').classList.toggle('dim', !hiddenCount);
+  const all = view.showHidden ? every : every.filter((r) => !isHidden(r));
   renderChips(all);
   renderRepoSelect(all);
   renderHeaders();
@@ -359,7 +370,7 @@ function render() {
 
   const query = filterInput.value.trim().toLowerCase();
   const shown = all.filter((r) => rowMatches(r, query)).sort(compare);
-  const filtered = Boolean(query || view.repo || view.statuses.length !== STATUSES.length);
+  const filtered = Boolean(query || view.repo || view.statuses.length !== STATUSES.length || view.showHidden);
   $('reset').hidden = !filtered;
   $('count').textContent = `${shown.length} of ${all.length} ${all.length === 1 ? 'row' : 'rows'}`;
 
@@ -428,7 +439,7 @@ function renderCards(shown, all, filtered) {
         sessions.map((r) => cardSession(r, repo.name)),
         bare && !sessions.length && el('div', { class: 'card-session s-none' },
           el('div', { class: 'card-session-main' }, statusCell('none')),
-          actionCell(bare),
+          el('div', { class: 'actions' }, actionCell(bare), hideButton(bare)),
         ),
       )),
     ), repo.name));
@@ -456,7 +467,7 @@ function renderCards(shown, all, filtered) {
 function cardSession(r, repoName) {
   const s = r.session;
   const others = s.repos.filter((x) => x !== repoName);
-  return el('div', { class: `card-session s-${r.status}`, ondblclick: (e) => {
+  return el('div', { class: `card-session s-${r.status}${isHidden(r) ? ' is-hidden' : ''}`, ondblclick: (e) => {
     const button = e.currentTarget.querySelector('button');
     if (button && !button.disabled) button.click();
   } },
@@ -475,8 +486,50 @@ function cardSession(r, repoName) {
         ),
       ),
     ),
-    actionCell(r),
+    el('div', { class: 'actions' }, actionCell(r), hideButton(r)),
   );
+}
+
+// Forget hidden keys whose session or worktree is gone for good.
+function pruneHidden(rows) {
+  const keys = new Set(rows.map((r) => r.key));
+  const kept = view.hidden.filter((k) => keys.has(k));
+  if (kept.length !== view.hidden.length) {
+    view.hidden = kept;
+    save();
+  }
+}
+
+function eyeIcon(crossed) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const shapes = [['path', { d: 'M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z' }], ['circle', { cx: 8, cy: 8, r: 2 }]];
+  if (crossed) shapes.push(['path', { d: 'M2.5 13.5l11-11' }]);
+  for (const [tag, attrs] of shapes) {
+    const node = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    svg.append(node);
+  }
+  return svg;
+}
+
+function hideButton(r) {
+  const hidden = isHidden(r);
+  return el('button', {
+    type: 'button',
+    class: `btn icon hide${hidden ? ' on' : ''}`,
+    title: hidden ? 'Unhide this row' : 'Hide this row (Show hidden brings it back)',
+    'aria-label': hidden ? 'Unhide' : 'Hide',
+    onclick: (e) => {
+      e.stopPropagation();
+      view.hidden = hidden ? view.hidden.filter((k) => k !== r.key) : [...view.hidden, r.key];
+      save();
+      if (!hidden && !view.showHidden) toast('Hidden. Turn on Show hidden to see it again.');
+      render();
+    },
+  }, eyeIcon(!hidden));
 }
 
 async function refresh() {
@@ -517,6 +570,7 @@ for (const th of document.querySelectorAll('th[data-key]')) {
 }
 
 repoSelect.addEventListener('change', () => { view.repo = repoSelect.value; save(); render(); });
+$('show-hidden').addEventListener('change', (e) => { view.showHidden = e.target.checked; save(); render(); });
 for (const tab of document.querySelectorAll('.tabs [data-view]')) {
   tab.addEventListener('click', () => { view.tab = tab.dataset.view; save(); render(); });
 }
@@ -525,6 +579,7 @@ $('reset').addEventListener('click', () => {
   filterInput.value = '';
   view.repo = '';
   view.statuses = [...STATUSES];
+  view.showHidden = false;
   save();
   render();
 });

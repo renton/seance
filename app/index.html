@@ -33,6 +33,11 @@
   <div class="toolbar">
     <div id="status-chips" class="chips" role="group" aria-label="Filter by status"></div>
     <div class="toolbar-right">
+      <label class="switch" id="show-hidden-wrap" title="Rows you hid with the eye button">
+        <input id="show-hidden" type="checkbox">
+        <span class="track" aria-hidden="true"></span>
+        <span>Show hidden <span id="hidden-count" class="n"></span></span>
+      </label>
       <label class="select">
         <span class="sr-only">Repo</span>
         <select id="repo-filter"></select>

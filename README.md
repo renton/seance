@@ -274,7 +274,7 @@ git branch -d feature/PROJ-123      # -D after a squash merge
 
 ## Desktop app
 
-`app/` is a small [Electron](https://www.electronjs.org/) window onto `seance list`: every session and ticket worktree in a sortable, filterable table (or as a card per repo), a button to attach to or resume each one in a terminal, a Fork button to carry a session's conversation onto another ticket, and a + button to start a new one. It keeps no data of its own: it runs `seance list --json` every few seconds and acts only through `seance`.
+`app/` is a small [Electron](https://www.electronjs.org/) window onto `seance list`: every session and ticket worktree in a sortable, filterable table (or as a card per repo), a button to attach to or resume each one in a terminal, a Fork button to carry a session's conversation onto another ticket, a + button to start a new one, and an eye button to hide rows you do not want to see (remembered by the app only; Show hidden brings them back). It keeps no data of its own: it runs `seance list --json` every few seconds and acts only through `seance`.
 
 Needs Node 22 or newer and [Terminator](https://gnome-terminator.org/) (set `SEANCE_APP_TERMINAL` to use another terminal that takes `-T <title> -x <command>`).
 
