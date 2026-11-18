@@ -9,7 +9,8 @@
 #
 # Fork a session onto another ticket (it keeps the whole conversation)
 #   seance <repo> <TICKET> <session-id>      fork that session
-#   seance <repo> <TICKET> here              fork the session this runs inside
+#   seance <repo> <TICKET> here              fork the session this runs inside (a few seconds on,
+#                                            once this command has finished)
 #
 # Inside a running session
 #   seance add <repo>[,<repo2>] [<TICKET>]   add repos' worktrees for the session's ticket
@@ -51,6 +52,7 @@ TITLES_FILE="$SEANCE_HOME/titles.tsv"
 WORKTREE_DIR=".claude/worktrees"
 BASE_OVERRIDE=""
 TITLE_SLUG=""
+FORK_DELAY=${SEANCE_FORK_DELAY:-6}
 START_NAME=""
 
 # A setting from the environment, else from the config file. The file is read as NAME=value
@@ -895,12 +897,36 @@ main() {
     JIRA=no
   fi
 
+  local fork_self=no
   if [[ "$source" == here ]]; then
     source=${CLAUDE_CODE_SESSION_ID:-}
     [[ -n "$source" ]] || die "'here' only works inside a Claude session"
+    fork_self=yes
   fi
 
   resolve_repos "$repos" "$ticket" "$do_fetch"
+
+  # Forking the session that is running this command: a fork made now would copy a
+  # conversation that ends on this very command, still without its result, and open on
+  # "No result recorded ... Interrupted" without its first prompt. So the worktrees are made
+  # now (errors show here), and the fork itself is left to a detached seance run a few seconds
+  # on, once this command has finished and its result is recorded.
+  if [[ "$fork_self" == yes ]]; then
+    local -a again=("$0" --bg)
+    [[ -z "$TITLE_SLUG" ]] || again+=(--title "$TITLE_SLUG")
+    [[ -z "$BASE_OVERRIDE" ]] || again+=(--base "$BASE_OVERRIDE")
+    [[ "$no_jira" == no ]] || again+=(--no-jira)
+    again+=("$repos" "$ticket" "$source")
+    [[ -z "$extra" ]] || again+=("$extra")
+    mkdir -p "$SEANCE_HOME"
+    setsid -f bash -c 'sleep "$1"; shift; exec "$@"' seance-fork "$FORK_DELAY" "${again[@]}" \
+      </dev/null >>"$SEANCE_HOME/forks.log" 2>&1
+    local name="${REPO_NAMES[0]}-$ticket"
+    [[ -z "$TITLE_SLUG" ]] || name+="-$TITLE_SLUG"
+    echo "Forking this session onto $ticket as $name, starting in ${FORK_DELAY}s once this command has finished."
+    echo "It then shows in seance list and the desktop app (seance pick opens it); its output goes to $SEANCE_HOME/forks.log."
+    return
+  fi
 
   local previous
   previous=$(last_session_for "${WORKTREES[0]}")

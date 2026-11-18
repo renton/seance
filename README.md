@@ -125,7 +125,9 @@ seance my-service PROJ-124 3f2a9c1e        # a session id from seance list (shor
 seance my-service PROJ-124 here            # inside a session: fork this one
 ```
 
-The fork carries the whole conversation into a new session in the new ticket's worktree; the original is untouched. Its first prompt has it read the new ticket and get oriented from what the conversation already knows, without writing a plan. `here` reads `CLAUDE_CODE_SESSION_ID`, so it works only inside a Claude session (ask Claude to run it).
+The fork carries the whole conversation into a new session in the new ticket's worktree; the original is untouched. Its first prompt has it read the new ticket and get oriented from what the conversation already knows, without writing a plan.
+
+`here` reads `CLAUDE_CODE_SESSION_ID`, so it works only inside a Claude session: ask Claude to run it. seance makes the worktrees straight away, so any error shows in that session, then forks a few seconds later, in the background, once the command has finished. (A fork made while the command was still running would copy a conversation ending on that unfinished command, and open on "No result recorded" without its first prompt.) The new session then shows in `seance list` and the desktop app; its startup output goes to `~/.seance/forks.log`. `SEANCE_FORK_DELAY` sets the wait in seconds (default 6).
 
 ### A ticket across several repos
 
@@ -312,6 +314,7 @@ A session id can be the full id or the 8 characters `seance list` shows. A fork'
 | `~/.seance/repos` | the lookup table: `<name> <path> [base branch]` |
 | `~/.seance/sessions.tsv` | every session seance started: created, repo, ticket, name, session id, worktree, forked from |
 | `~/.seance/titles.tsv` | the few words each session was named with: session id, words, when (the latest wins) |
+| `~/.seance/forks.log` | the output of forks started with `here`, which run in the background a few seconds later |
 
 `SEANCE_HOME` moves them all.
 
