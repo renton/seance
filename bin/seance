@@ -1,32 +1,45 @@
 #!/usr/bin/env bash
-# seance: start or fork a Claude session for a Jira ticket in its own git worktree.
+# seance: a Claude Code session per Jira ticket (or any piece of work), each in its own git worktree.
 #
-#   seance <repo> <TICKET>                 session on the ticket's branch (resumes its last one)
-#   seance <repo> <TICKET> <session-id>    fork that session onto the ticket's branch
-#   seance <repo> <TICKET> here            fork the session this runs inside
-#   seance <repo>,<repo2> <TICKET> ...     a worktree in each repo, one session across them
-#   seance <repo> <TICKET> [...] "<prompt>"  your own first prompt instead of "get oriented and wait"
-#   seance add <repo>[,<repo2>] [<TICKET>] inside a session: add repos' worktrees for its ticket
-#   seance list                            repos, worktrees, branches and sessions
-#   seance list --json                     the same as JSON, for other tools
-#   seance pick                            choose a session from a menu and attach to or resume it
-#   seance open <session-id>               attach to or resume that session, as pick would
-#   seance title [<session-id>] "<words>"  name a session <repo>-<ticket>-<words> (inside one, it names itself)
-#   seance repos                           the lookup table
-#   seance --no-jira <repo> <name> ...     the same for work with no ticket: any name, nothing read from Jira
+# Start and come back
+#   seance <repo> <TICKET>                   start the ticket's session, or resume its last one
+#   seance <repo>,<repo2> <TICKET>           one session across several repos, a worktree in each
+#   seance <repo> <TICKET> "<prompt>"        your own first prompt instead of "get oriented and wait"
+#   seance -n <repo> <name>                  the same for work with no ticket: any name, no Jira
 #
-# Options (before the arguments): --bg        start in the background
-#                                  --new       start a fresh session even if the ticket has one
-#                                  --no-fetch  branch from origin/<base> as last fetched
-#                                  --base <branch>  branch new worktrees from origin/<branch> (e.g. develop)
-#                                  -n, --no-jira  the second argument is a plain name, not a Jira key
+# Fork a session onto another ticket (it keeps the whole conversation)
+#   seance <repo> <TICKET> <session-id>      fork that session
+#   seance <repo> <TICKET> here              fork the session this runs inside
 #
-# Environment: SEANCE_BRANCH_FORMAT  branch name template, default feature/{ticket} ({repo} also works)
-#              SEANCE_HOME           config folder, default ~/.seance
-#              SEANCE_JIRA_URL       your Jira site (https://example.atlassian.net), for ticket links
-#              SEANCE_NOTES_DIR      folder of notes on your repos (INDEX.md, <repo>.md) for new sessions to read
-#              All but SEANCE_HOME can also go in $SEANCE_HOME/config as NAME=value lines; the
-#              environment wins when both set one.
+# Inside a running session
+#   seance add <repo>[,<repo2>] [<TICKET>]   add repos' worktrees for the session's ticket
+#   seance title "<words>"                   name this session <repo>-<ticket>-<words>
+#
+# Find and open sessions
+#   seance list                              repos, worktrees, branches and sessions
+#   seance list --json                       the same as JSON, for other tools
+#   seance pick                              choose one from a menu; attach to it or resume it
+#   seance open <session-id>                 attach to or resume that one, as pick would
+#   seance title <session-id> "<words>"      name any seance session
+#   seance repos                             the lookup table
+#
+# Options, before the arguments
+#   --title "<words>"    start the session already named <repo>-<ticket>-<words>
+#   --base <branch>      start new branches from origin/<branch> instead of the default
+#   -n, --no-jira        the second argument is a plain name, not a Jira key
+#   --new                start a fresh session even if the ticket has one
+#   --bg                 start in the background (always so when Claude runs seance)
+#   --no-fetch           branch from origin/<base> as last fetched
+#   -h, --help           this help
+#
+# Settings, in ~/.seance/config as NAME=value lines or as environment variables (which win)
+#   SEANCE_BRANCH_FORMAT   branch name template, default feature/{ticket} ({repo} also works)
+#   SEANCE_JIRA_URL        your Jira site (https://example.atlassian.net), for ticket links
+#   SEANCE_NOTES_DIR       notes on your repos (INDEX.md, <repo>.md) for sessions to read
+#   SEANCE_HOME            where config, the repo table and records live, default ~/.seance
+#                          (environment only)
+#
+# More: README.md in the seance repo, and app/README.md there for the desktop app.
 
 set -euo pipefail
 

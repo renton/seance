@@ -6,18 +6,25 @@ Start, resume or fork a [Claude Code](https://claude.com/claude-code) session fo
 seance my-service PROJ-123
 ```
 
-creates a worktree for `PROJ-123` on its own branch, fresh from the remote's base branch, and opens a Claude session there that reads the ticket and gets oriented in the code. Run it again later and it resumes that session. Fork an existing session onto a new ticket and the fork keeps the whole conversation.
+creates a worktree for `PROJ-123` on its own branch, fresh from the remote's base branch, and opens a Claude session there that reads the ticket and gets oriented in the code. Run it again later and it resumes that session. Fork a session onto a new ticket and the fork keeps the whole conversation. Work that has no ticket gets the same treatment under any name you like.
+
+A [desktop app](app/README.md) shows every session in a table, with buttons to open, fork, rename and start them.
+
+- [Setup](#setup)
+- [Usage guide](#usage-guide)
+- [Command reference](#command-reference)
+- [Desktop app](#desktop-app)
+- [Files](#files)
+- [How it works](#how-it-works)
 
 ## Setup
 
 ### Requirements
 
 - Claude Code with background sessions (`claude --bg`, `claude agents`)
-- git 2.31 or newer
-- `jq`
-- bash
+- git 2.31 or newer, bash, `jq`
+- An Atlassian (Jira) MCP server connected to Claude Code, for sessions to read their ticket
 - `fzf` (optional, for the `seance pick` menu)
-- An Atlassian (Jira) MCP server connected to Claude Code, for the session to read the ticket
 
 ### Install
 
@@ -36,7 +43,7 @@ my-service    /home/me/code/my-service
 web-app       /home/me/code/web-app      develop
 ```
 
-The base branch is optional. Without it seance uses the remote's default branch (`origin/HEAD`, else `origin/main`, else `origin/master`). For one ticket, `--base <branch>` overrides it for every repo in that command (`seance --base develop my-service PROJ-123`; `origin/develop` works too). It only matters when the ticket's branch is new: an existing branch or worktree is used as it is, and seance says the option was ignored. The desktop app's New and Fork dialogs have the same option as an optional Base branch field.
+The base branch is optional. Without it seance uses the remote's default branch (`origin/HEAD`, else `origin/main`, else `origin/master`).
 
 To list every git checkout under a folder as a starting point:
 
@@ -55,48 +62,20 @@ SEANCE_JIRA_URL=https://yourcompany.atlassian.net
 SEANCE_NOTES_DIR=~/notes/repos
 ```
 
-seance reads that file however it is started (a terminal, the desktop app or its dock launcher, or Claude), so this is the place that always works. The file is read as plain lines, never run as a script; quotes around a value are dropped and a leading `~/` means your home folder. Each setting can also be an environment variable (an `export` line in `~/.bashrc`), which wins over the file when both set it. `SEANCE_HOME` itself can only be an environment variable, since it says where the file is.
+seance reads that file however it is started (a terminal, the desktop app or its dock launcher, or Claude), so it is the place that always works. It is read as plain lines, never run as a script; quotes around a value are dropped and a leading `~/` means your home folder. Each setting can also be an environment variable (an `export` line in `~/.bashrc`), which wins over the file when both set it.
 
-| Variable | Default | What it does |
+| Setting | Default | What it does |
 |---|---|---|
-| `SEANCE_BRANCH_FORMAT` | `feature/{ticket}` | The branch name for a ticket. `{ticket}` is required; `{repo}` is the name from the lookup table. |
-| `SEANCE_JIRA_URL` | unset | Your Jira site. Adds the ticket's link to the session's first prompt, to `seance list`, and to the desktop app, where clicking a ticket opens it in your browser. |
-| `SEANCE_NOTES_DIR` | unset | A folder of notes on your repos: `INDEX.md` for how they connect, `<repo>.md` per repo (named as in the lookup table). A new session is told to read the ones that exist for its repos. |
-| `SEANCE_HOME` | `~/.seance` | Where the lookup table and session records live (environment only). |
-
-**Branch format examples:** `feature/{ticket}` gives `feature/PROJ-123`; `{ticket}` gives `PROJ-123`; `me/{repo}/{ticket}` gives `me/my-service/PROJ-123`.
-
-**Do you need `SEANCE_JIRA_URL`?** Without it, the session finds your Jira site through the Atlassian MCP, which works when your account reaches only one site. Set it if you have several sites (so the session reads the ticket from the right one), or if you want ticket links in `seance list`.
+| `SEANCE_BRANCH_FORMAT` | `feature/{ticket}` | The branch name for a ticket. `{ticket}` is required; `{repo}` is the name from the lookup table. `{ticket}` gives `PROJ-123`; `me/{repo}/{ticket}` gives `me/my-service/PROJ-123`. |
+| `SEANCE_JIRA_URL` | unset | Your Jira site. Adds the ticket's link to the session's first prompt, to `seance list`, and to the desktop app, where clicking a ticket opens it in your browser. Without it the session finds the site through the Atlassian MCP, which works when your account reaches only one site. |
+| `SEANCE_NOTES_DIR` | unset | A folder of notes on your repos: `INDEX.md` for how they connect, `<repo>.md` per repo (named as in the lookup table). New sessions are told to read the ones that exist for their repos, and every session can read the folder without asking. |
+| `SEANCE_HOME` | `~/.seance` | Where the config, the lookup table and the session records live. Environment only, since it says where the config file is. |
 
 ### Trust
 
 Claude only starts background sessions in folders you have trusted. Trusting a parent folder (for example the one holding all your repos) covers every repo and worktree under it.
 
-## Usage
-
-```
-seance <repo> <TICKET>                 session on the ticket's branch (resumes its last one)
-seance <repo> <TICKET> <session-id>    fork that session onto the ticket's branch
-seance <repo> <TICKET> here            fork the session this runs inside
-seance <repo>,<repo2> <TICKET> ...     a worktree in each repo, one session across them
-seance <repo> <TICKET> [...] "<prompt>"  your own first prompt instead of "get oriented and wait"
-seance add <repo>[,<repo2>] [<TICKET>] inside a session: add repos' worktrees for its ticket
-seance list                            repos, worktrees, branches and sessions
-seance list --json                     the same as JSON, for other tools
-seance pick                            choose a session from a menu and attach to or resume it
-seance open <session-id>               attach to or resume that session, as pick would
-seance title [<session-id>] "<words>"  name a session <repo>-<ticket>-<words> (inside one, it names itself)
-seance repos                           the lookup table
-seance --no-jira <repo> <name> ...     the same for work with no ticket: any name, nothing read from Jira
-seance help
-
-options (before the arguments):
-  --bg        start the session in the background
-  --new       start a fresh session even if the ticket already has one
-  --no-fetch  branch from origin/<base> as last fetched
-  --base <branch>  start new branches from origin/<branch> (develop, release/2.4, ...)
-  -n, --no-jira  the second argument is a plain name, not a Jira key
-```
+## Usage guide
 
 ### Start work on a ticket
 
@@ -106,7 +85,7 @@ seance my-service PROJ-123
 
 1. Fetches the base branch and creates the worktree `my-service/.claude/worktrees/PROJ-123` on a new branch `feature/PROJ-123` from `origin/<base>`. The repo folder itself is never touched, so a messy working directory there does not matter and nothing needs pulling. An existing branch or worktree for the ticket is reused.
 2. Adds `/.claude/worktrees/` to the repo's `.git/info/exclude` (a local ignore, never committed), so worktrees stay out of `git status` and searches in the repo folder.
-3. Opens Claude in the worktree, named `my-service-PROJ-123`, with a first prompt to get up to speed on each repo (reading your notes on them first, if `SEANCE_NOTES_DIR` is set), read the ticket (read-only), restate its acceptance criteria, name the repos it touches, find where the work lives in the code, and then stop. It does not write a plan or change anything; you say what to do next.
+3. Opens Claude in the worktree, named `my-service-PROJ-123`, with a first prompt to get up to speed on each repo (your notes on them first, if `SEANCE_NOTES_DIR` is set), read the ticket (read-only), restate its acceptance criteria, name the repos it touches, find where the work lives, and name itself (see below). Then it stops: it does not write a plan or change anything until you say what to do.
 4. Records the session in `~/.seance/sessions.tsv`.
 
 ### Come back to it
@@ -115,43 +94,63 @@ seance my-service PROJ-123
 seance my-service PROJ-123
 ```
 
-The same command resumes the ticket's last session. If it is already running in the background it prints the `claude attach` command; if it is open in another terminal it says so. `--new` starts a fresh session instead.
+The same command resumes the ticket's last session, with access to every worktree it has used. If it is already running in the background it prints the `claude attach` command; if it is open in another terminal it says so. `--new` starts a fresh session instead.
+
+### Session names
+
+A session starts as `<repo>-<TICKET>`, because seance does not read the ticket itself. Its first prompt asks it to run `seance title "<a few words>"` once it knows what the work is about, which makes it `<repo>-<TICKET>-<words>`, for example `my-service-PROJ-123-rotate-demo-lb-certs` (at most five words, lowercased and hyphenated). The new name shows at once in `seance list`, `pick`, `--json` and the desktop app.
+
+To choose the name yourself:
+
+```
+seance --title "rotate demo lb certs" my-service PROJ-123     # name it from the start
+seance title 3f2a9c1e "rotate demo lb certs"                  # rename any seance session
+```
+
+A session started with `--title` is only asked to check its name still fits. Claude's own name for a session (in `claude agents` and its picker) takes a new title the next time seance resumes it, since a running session cannot be renamed from outside.
+
+### Branch from something other than the default
+
+```
+seance --base develop my-service PROJ-123
+seance --base origin/release/2.4 my-service,web-app PROJ-456
+```
+
+New branches start from `origin/<branch>` instead of the repo's default or the base in the lookup table, for every repo in the command; `origin/` is optional. It only matters when the ticket's branch is new: an existing branch or worktree is used as it is, and seance says the option was ignored. A branch the remote does not have stops seance with a message before it makes that repo's worktree.
 
 ### Fork a session onto another ticket
 
 ```
-seance my-service PROJ-124 3f2a9c1e-...    # a session id, from `seance list` or `claude agents`
+seance my-service PROJ-124 3f2a9c1e        # a session id from seance list (short or full)
 seance my-service PROJ-124 here            # inside a session: fork this one
 ```
 
-The fork carries the whole conversation into a new session in the new ticket's worktree; the original session is untouched. Its first prompt has it read the new ticket and get oriented from what the conversation already knows, without writing a plan. `here` reads `CLAUDE_CODE_SESSION_ID`, so it works only inside a Claude session (ask Claude to run it).
+The fork carries the whole conversation into a new session in the new ticket's worktree; the original is untouched. Its first prompt has it read the new ticket and get oriented from what the conversation already knows, without writing a plan. `here` reads `CLAUDE_CODE_SESSION_ID`, so it works only inside a Claude session (ask Claude to run it).
 
 ### A ticket across several repos
 
-One session can work across several repos, with each repo getting its own worktree and branch (so one PR per repo, all carrying the ticket key) and the repo folders themselves left alone.
-
-Start it that way by listing the repos with commas and no spaces:
+One session can work across several repos, each with its own worktree and branch (so one PR per repo, all carrying the ticket key), with the repo folders themselves left alone. List the repos with commas and no spaces:
 
 ```
 seance my-service,web-app PROJ-123
 ```
 
-This makes a worktree for `PROJ-123` in each repo, starts the session in the first, and gives it access to the others (`claude --add-dir`). Its first prompt lists every worktree. The same command resumes it later, with the same access.
+This makes a worktree for `PROJ-123` in each repo, starts the session in the first, and gives it access to the others (`claude --add-dir`).
 
 To bring in more repos once the session is running, have Claude run:
 
 ```
 seance add web-app
-seance add web-app,api-gateway      # several at once, same comma list
+seance add web-app,api-gateway      # several at once
 ```
 
-It works out the ticket from the session's own worktree (or give it: `seance add web-app PROJ-123`), creates the worktrees, and prints a line per worktree for you to type at the session's prompt:
+It works out the ticket from the session's own worktree (or give it: `seance add web-app PROJ-123`), creates the worktrees, and prints a line per worktree for you to type at the session's prompt, since Claude cannot run slash commands in its own session:
 
 ```
 /add-dir /home/me/code/web-app/.claude/worktrees/PROJ-123
 ```
 
-Every repo in a list is checked against the lookup table before any worktree is made, so a typo leaves nothing half-done. That last step is yours: Claude cannot run slash commands in its own session.
+Every repo in a list is checked against the lookup table before any worktree is made, so a typo leaves nothing half-done. Repos added this way are remembered: resuming the session later gives it access to them again.
 
 For a large, separable change in another repo, a second session can suit better: `seance web-app PROJ-123 here` forks the conversation into that repo's worktree.
 
@@ -163,7 +162,7 @@ seance my-service PROJ-124 here "pick up where we left off on PROJ-124"
 seance -n my-service fix-ci-cache "find out why the cache step misses"
 ```
 
-A last argument that is not a session id (`here`, a full id, or the 8-character one `seance list` shows) is your prompt. Quote it. It replaces the default "get oriented and wait" steps: the session is still told its ticket and how to read it (read-only), its worktrees, and your repo notes, then given your words. On a resume your prompt is sent as the next message; if the session is already running, it is not sent and seance says so.
+A last argument that is not a session id is your prompt. Quote it. It replaces the default "get oriented and wait" steps: the session is still told its ticket and how to read it (read-only), its worktrees and your repo notes, then given your words. On a resume your prompt is sent as the next message; if the session is already running, it is not sent and seance says so.
 
 ### Work with no ticket
 
@@ -172,9 +171,9 @@ seance --no-jira my-service fix-ci-cache
 seance -n my-service fix-ci-cache          # the same
 ```
 
-Everything works as for a ticket (a fetched base, the worktree `my-service/.claude/worktrees/fix-ci-cache`, the branch `feature/fix-ci-cache`, a session named `my-service-fix-ci-cache`), but the second argument is taken as a plain name and nothing is read from Jira. The session gets up to speed on the repos and waits for you to describe the work. A name may use letters, digits, `.`, `_` and `-`, and its case is kept.
+Everything works as for a ticket (a fetched base, the worktree `my-service/.claude/worktrees/fix-ci-cache`, the branch `feature/fix-ci-cache`, a session named `my-service-fix-ci-cache`), but the second argument is taken as a plain name and nothing is read from Jira. The session gets up to speed on the repos and waits for you to describe the work. A name may use letters, digits, `.`, `_` and `-`, and keeps its case.
 
-`--no-jira` is needed only to create it. Once the worktree exists, `seance my-service fix-ci-cache` resumes it like any other. It works with several repos, forks and `seance add` too.
+`-n` is needed only to create it. Once the worktree exists, `seance my-service fix-ci-cache` resumes it like any other. It works with several repos, forks, `--title`, `--base` and `seance add` too.
 
 ### See everything
 
@@ -186,7 +185,7 @@ seance list
 ── my-service ──────────────────────────────────────── ~/code/my-service
    repo folder             main
    PROJ-123                feature/PROJ-123
-     └─ my-service-PROJ-123  3f2a9c1e  background idle
+     └─ my-service-PROJ-123-rotate-demo-lb-certs  3f2a9c1e  background idle
    PROJ-124                feature/PROJ-124
      └─ my-service-PROJ-124  8be01d77  stopped (seance my-service PROJ-124)  fork of 3f2a9c1e
 
@@ -194,9 +193,23 @@ seance list
    repo folder             develop
 ```
 
-Worktrees under `.claude/worktrees/` are shown by their folder name (the ticket). Colour is used only when the output is a terminal.
+Every repo in the table, each worktree with its branch, and the sessions in it: seance's own, plus any other session running in that folder. "repo folder" is the repo's own checkout, on whatever branch you left it; seance never runs a session there.
 
-Every repo in the table, each worktree with its branch, and the sessions in it: seance's own, plus any other running session in that folder.
+### Pick a session from a menu
+
+```
+seance pick
+```
+
+Lists every session, newest first, and acts on the one you choose:
+
+- running in the background (busy or idle): `claude attach`
+- stopped, or a background session that has ended: resumes it in its worktree, with access to every worktree recorded for it
+- open in another terminal: says so
+
+The menu uses [fzf](https://github.com/junegunn/fzf) when it is installed (type part of a ticket or repo to narrow it down), and a numbered list otherwise.
+
+`seance open <session-id>` does the same for one session without the menu, for scripts and launchers: for example `terminator -x seance open 3f2a9c1e`. For a session already open elsewhere it says so and exits non-zero.
 
 ### As JSON, for other tools
 
@@ -204,7 +217,7 @@ Every repo in the table, each worktree with its branch, and the sessions in it: 
 seance list --json
 ```
 
-The same information for a UI or script to read. `version` changes only if the shape does.
+The same information for a UI or script. `version` changes only if the shape does.
 
 ```
 {
@@ -220,7 +233,8 @@ The same information for a UI or script to read. `version` changes only if the s
           "jira_url": "https://yourcompany.atlassian.net/browse/PROJ-123",
           "session_ids": ["3f2a9c1e-..."] } ] } ],
   "sessions": [
-    { "session_id": "3f2a9c1e-...", "short_id": "3f2a9c1e", "name": "my-service-PROJ-123",
+    { "session_id": "3f2a9c1e-...", "short_id": "3f2a9c1e",
+      "name": "my-service-PROJ-123-rotate-demo-lb-certs", "title": "rotate-demo-lb-certs",
       "ticket": "PROJ-123", "jira_url": "https://...", "repos": ["my-service"],
       "worktrees": ["/home/me/code/my-service/.claude/worktrees/PROJ-123"],
       "cwd": "/home/me/code/my-service/.claude/worktrees/PROJ-123",
@@ -232,26 +246,11 @@ The same information for a UI or script to read. `version` changes only if the s
 
 - `sessions` is newest first: seance's own, then any other session running in one of your repos (`from_seance: false`).
 - `state` is `running`, `idle` (both background), `open` (in a terminal somewhere) or `stopped`.
-- `action` is what to do with it: `attach` (`claude attach <attach_id>`), `open` (already open, `pid` says where) or `resume`. `seance pick` follows the same rules, and is built on this output.
+- `action` is what to do with it: `attach` (`claude attach <attach_id>`), `open` (already open; `pid` says where) or `resume`. `seance pick` and the desktop app follow it.
+- `title` is the few words the session was named with, or null; `name` already includes it.
 - `resumable` is false when a stopped session's worktree has been removed.
 - `base` is the pinned base branch from the lookup table, or null for the remote's default. `present` is false when the repo's folder is missing.
 - `jira_url` is set only when `SEANCE_JIRA_URL` is and the name is a Jira key.
-
-### Pick a session from a menu
-
-```
-seance pick
-```
-
-Lists every session from `seance list`, newest first, one line each, and acts on the one you choose:
-
-- running in the background (busy or idle): `claude attach`
-- stopped, or a background session that has ended: resumes it in its worktree, as `seance <repo> <TICKET>` would, with access to every worktree recorded for it (including ones added with `seance add`)
-- open in another terminal: says so
-
-`seance open <session-id>` does the same for one session without the menu (the full id, or the 8 characters `seance list` shows), for scripts and launchers: for example `terminator -x seance open 3f2a9c1e`. For a session already open in another terminal it says so and exits non-zero.
-
-The menu uses [fzf](https://github.com/junegunn/fzf) when it is installed (type part of a ticket or repo to narrow it down), and a numbered `select` list otherwise. Stopped sessions whose worktree has been removed are left out.
 
 ### Run by you or by Claude
 
@@ -260,9 +259,7 @@ The menu uses [fzf](https://github.com/junegunn/fzf) when it is installed (type 
 | Fetch the base branch | yes (`--no-fetch` skips it) | yes (`--no-fetch` skips it) |
 | Session | opens here, interactive (`--bg` for background) | starts in the background; `claude attach <id>` opens it |
 
-When there is no terminal (Claude running it through its shell tool) seance always starts the session in the background.
-
-The fetch only updates `origin/<base>`, and only when a new branch is made. seance never merges, pulls or pushes, and never touches your local base branch, so the state of the repo folder does not matter.
+The fetch only updates `origin/<base>`, and only when a new branch is made. seance never merges, pulls or pushes, and never touches your local base branch.
 
 ### Clean up after a merge
 
@@ -273,64 +270,54 @@ git worktree remove .claude/worktrees/PROJ-123
 git branch -d feature/PROJ-123      # -D after a squash merge
 ```
 
+## Command reference
+
+```
+seance <repo> <TICKET>                   start the ticket's session, or resume its last one
+seance <repo>,<repo2> <TICKET>           one session across several repos, a worktree in each
+seance <repo> <TICKET> "<prompt>"        your own first prompt instead of "get oriented and wait"
+seance -n <repo> <name>                  the same for work with no ticket: any name, no Jira
+seance <repo> <TICKET> <session-id>      fork that session onto the ticket
+seance <repo> <TICKET> here              fork the session this runs inside
+seance add <repo>[,<repo2>] [<TICKET>]   inside a session: add repos' worktrees for its ticket
+seance title "<words>"                   inside a session: name it <repo>-<ticket>-<words>
+seance title <session-id> "<words>"      name any seance session
+seance list                              repos, worktrees, branches and sessions
+seance list --json                       the same as JSON, for other tools
+seance pick                              choose a session from a menu; attach to it or resume it
+seance open <session-id>                 attach to or resume that session, as pick would
+seance repos                             the lookup table
+seance help
+
+options, before the arguments:
+  --title "<words>"    start the session already named <repo>-<ticket>-<words>
+  --base <branch>      start new branches from origin/<branch> instead of the default
+  -n, --no-jira        the second argument is a plain name, not a Jira key
+  --new                start a fresh session even if the ticket has one
+  --bg                 start in the background (always so when Claude runs seance)
+  --no-fetch           branch from origin/<base> as last fetched
+```
+
+A session id can be the full id or the 8 characters `seance list` shows. A fork's session id and your prompt can both be given, in that order.
+
 ## Desktop app
 
-`app/` is a small [Electron](https://www.electronjs.org/) window onto `seance list`: every session and ticket worktree in a sortable, filterable table (or as a card per repo), a button to attach to or resume each one in a terminal, a Fork button to carry a session's conversation onto another ticket, a + button to start a new one, and an eye button to hide rows you do not want to see (remembered by the app only; Show hidden brings them back). It keeps no data of its own: it runs `seance list --json` every few seconds and acts only through `seance`.
-
-Needs Node 22 or newer and [Terminator](https://gnome-terminator.org/) (set `SEANCE_APP_TERMINAL` to use another terminal that takes `-T <title> -x <command>`).
-
-```
-cd app
-npm install
-npm start          # the first run downloads Electron's binary
-```
-
-The page has no access to your system. It can ask the app for three things only: the list, opening a session by id, and starting a session for a name and a set of repos from the lookup table, optionally forking an existing session. The app checks each request against a fresh `seance list --json` before it runs `seance` in a new terminal, and only opens Jira links that seance itself produced.
-
-**Ubuntu 24.04 and later** block the sandbox Electron uses, so the app crashes on start with "The SUID sandbox helper binary was found, but is not configured correctly". Allow it for this one binary with an AppArmor profile (adjust the path):
-
-```
-sudo tee /etc/apparmor.d/seance-electron >/dev/null <<'EOF'
-abi <abi/4.0>,
-include <tunables/global>
-
-profile seance-electron /home/me/seance/app/node_modules/electron/dist/electron flags=(unconfined) {
-  userns,
-
-  include if exists <local/seance-electron>
-}
-EOF
-sudo apparmor_parser -r /etc/apparmor.d/seance-electron
-```
-
-**A launcher** for the dock: save this as `~/.local/share/applications/seance.desktop` (adjust the paths), then find seance with the Super key and pin it.
-
-```
-[Desktop Entry]
-Type=Application
-Name=seance
-Comment=Claude sessions for your tickets, by repo and worktree
-Exec=/home/me/seance/app/node_modules/electron/dist/electron /home/me/seance/app
-Icon=/home/me/seance/app/icon.svg
-Terminal=false
-Categories=Development;
-StartupWMClass=seance
-```
-
-A launcher does not read `~/.bashrc`, so keep your settings in `~/.seance/config` (see Optional settings), which seance reads however it is started.
+`app/` is a small Electron window onto `seance list`: every session and ticket worktree in a sortable, filterable table or as a card per repo, with buttons to attach, resume, fork, rename, hide and start sessions. It keeps no data of its own and acts only through `seance`. Setup (Node, the AppArmor profile Ubuntu needs, a dock launcher) and a tour are in [app/README.md](app/README.md).
 
 ## Files
 
 | File | What it holds |
 |---|---|
-| `~/.seance/config` | optional settings, `NAME=value` per line (see Optional settings) |
+| `~/.seance/config` | optional settings, `NAME=value` per line |
 | `~/.seance/repos` | the lookup table: `<name> <path> [base branch]` |
 | `~/.seance/sessions.tsv` | every session seance started: created, repo, ticket, name, session id, worktree, forked from |
-| `~/.seance/titles.tsv` | the few words each session named itself with: session id, words, when (the latest wins) |
+| `~/.seance/titles.tsv` | the few words each session was named with: session id, words, when (the latest wins) |
 
-`SEANCE_HOME` moves both.
+`SEANCE_HOME` moves them all.
 
-## Notes
+## How it works
 
+- Each session is a plain Claude Code session. seance chooses its folder, its name, the folders it may use (`--add-dir` for the session's other worktrees and `SEANCE_NOTES_DIR`) and its first prompt, then gets out of the way.
 - `claude --bg` ignores `--session-id`, so for background sessions seance reads the id back from `claude agents --json`.
-- A session starts as `<repo>-<TICKET>`, because seance does not read the ticket itself. Its first prompt asks it to run `seance title "<a few words>"` once it knows what the work is, which makes it `<repo>-<TICKET>-<words>` (at most five words, lowercased and hyphenated) in `seance list`, `pick`, `--json` and the app at once. Claude's own name for the session (in `claude agents` and its picker) takes the new name the next time seance resumes it, since a running session cannot be renamed from outside. To name an older session, run `seance title <session-id> "<words>"`, or ask the session to run `seance title "<words>"`.
+- When there is no terminal (Claude running seance through its shell tool), seance always starts the session in the background and prints the `claude attach` line.
+- A session's state comes from `claude agents --json --all`. A background session with no status has ended, so it is resumed rather than attached.
