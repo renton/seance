@@ -9,10 +9,12 @@
 #   seance list                            repos, worktrees, branches and sessions
 #   seance pick                            choose a session from a menu and attach to or resume it
 #   seance repos                           the lookup table
+#   seance --no-jira <repo> <name> ...     the same for work with no ticket: any name, nothing read from Jira
 #
 # Options (before the arguments): --bg        start in the background
 #                                  --new       start a fresh session even if the ticket has one
 #                                  --no-fetch  branch from origin/<base> as last fetched
+#                                  --no-jira   the second argument is a plain name, not a Jira key
 #
 # Environment: SEANCE_BRANCH_FORMAT  branch name template, default feature/{ticket} ({repo} also works)
 #              SEANCE_HOME           config folder, default ~/.seance
@@ -56,6 +58,29 @@ usage() {
 }
 
 is_terminal() { [[ -t 0 && -t 1 ]]; }
+
+is_jira_key() { [[ "$1" =~ ^[A-Z][A-Z0-9]+-[0-9]+$ ]]; }
+
+# The name for the worktree and branch: a Jira key (uppercased), or with --no-jira any plain name.
+# A plain name given without --no-jira is accepted when the first repo already has its worktree.
+work_name() {
+  local raw=$1 no_jira=$2 first_repo=$3 path
+  if [[ "$no_jira" == yes ]]; then
+    [[ "$raw" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "'$raw' is not a usable name (letters, digits, '.', '_' and '-')"
+    echo "$raw"
+    return
+  fi
+  if is_jira_key "${raw^^}"; then
+    echo "${raw^^}"
+    return
+  fi
+  path=$(repo_field "$first_repo" 2)
+  if [[ -n "$path" && -d "$path/$WORKTREE_DIR/$raw" ]]; then
+    echo "$raw"
+    return
+  fi
+  die "'$raw' does not look like a Jira key (PROJ-123); for work with no ticket, use: seance --no-jira <repo> $raw"
+}
 
 branch_name() {
   local repo_name=$1 ticket=$2 branch
@@ -175,6 +200,18 @@ new_prompt() {
     orient+=" Start with these notes on the repos and how they connect to each other. They may be out of date, so check the code where it matters:
 $notes"
   fi
+  if [[ "$JIRA" == no ]]; then
+    cat <<EOF
+Start work on $ticket. This is not a Jira ticket: there is nothing to look up, and I will describe the work.
+
+These git worktrees were made for it, one per repo. Read and change files only in them, never in the repo folders themselves. Your working directory is the first.
+$(worktree_lines)
+
+$orient
+Then tell me briefly what you found, and stop. Do not change anything until I say what the work is.
+EOF
+    return
+  fi
   cat <<EOF
 Start work on Jira ticket $ticket.
 
@@ -193,6 +230,17 @@ EOF
 
 fork_prompt() {
   local ticket=$1 source=$2
+  if [[ "$JIRA" == no ]]; then
+    cat <<EOF
+This session is a fork of $source, moving on to $ticket. This is not a Jira ticket: there is nothing to look up, and I will describe the work.
+
+These git worktrees were made for it, one per repo. Read and change files only in them, even where earlier messages name other paths. Your working directory is now the first.
+$(worktree_lines)
+
+Do not change anything until I say what the work is.
+EOF
+    return
+  fi
   cat <<EOF
 This session is a fork of $source, moving on to Jira ticket $ticket.
 
@@ -292,12 +340,13 @@ start_session() {
 
 # Add repos' worktrees to the session this runs in, for the ticket that session works on.
 cmd_add() {
-  local repos=$1 ticket=${2:-} do_fetch=$3
+  local repos=$1 ticket=${2:-} do_fetch=$3 no_jira=$4
   if [[ -z "$ticket" ]]; then
     [[ "$PWD/" =~ /$WORKTREE_DIR/([^/]+)/ ]] || die "cannot tell the ticket from $PWD; give it: seance add <repo>[,<repo2>] <TICKET>"
     ticket=${BASH_REMATCH[1]}
+  else
+    ticket=$(work_name "$ticket" "$no_jira" "${repos%%,*}")
   fi
-  ticket=${ticket^^}
 
   resolve_repos "$repos" "$ticket" "$do_fetch"
 
@@ -508,11 +557,12 @@ cmd_pick() {
 }
 
 main() {
-  local background=auto do_fetch=auto force_new=no
+  local background=auto do_fetch=auto force_new=no no_jira=no
   while [[ $# -gt 0 && "$1" == --* ]]; do
     case "$1" in
       --bg) background=yes ;;
       --no-fetch) do_fetch=no ;;
+      --no-jira) no_jira=yes ;;
       --new) force_new=yes ;;
       --help) usage 0 ;;
       *) die "unknown option $1" ;;
@@ -540,13 +590,17 @@ main() {
 
   if [[ "$1" == add ]]; then
     [[ $# -ge 2 && $# -le 3 ]] || usage 1
-    cmd_add "$2" "${3:-}" "$do_fetch"
+    cmd_add "$2" "${3:-}" "$do_fetch" "$no_jira"
     return
   fi
 
   [[ $# -ge 2 && $# -le 3 ]] || usage 1
-  local repos=$1 ticket=${2^^} source=${3:-}
-  [[ "$ticket" =~ ^[A-Z][A-Z0-9]+-[0-9]+$ ]] || die "'$2' does not look like a Jira key (PROJ-123)"
+  local repos=$1 ticket source=${3:-}
+  ticket=$(work_name "$2" "$no_jira" "${repos%%,*}")
+  JIRA=yes
+  if [[ "$no_jira" == yes ]] || ! is_jira_key "$ticket"; then
+    JIRA=no
+  fi
 
   if [[ "$source" == here ]]; then
     source=${CLAUDE_CODE_SESSION_ID:-}

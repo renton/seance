@@ -83,12 +83,14 @@ seance add <repo>[,<repo2>] [<TICKET>] inside a session: add repos' worktrees fo
 seance list                            repos, worktrees, branches and sessions
 seance pick                            choose a session from a menu and attach to or resume it
 seance repos                           the lookup table
+seance --no-jira <repo> <name> ...     the same for work with no ticket: any name, nothing read from Jira
 seance help
 
 options (before the arguments):
   --bg        start the session in the background
   --new       start a fresh session even if the ticket already has one
   --no-fetch  branch from origin/<base> as last fetched
+  --no-jira   the second argument is a plain name, not a Jira key
 ```
 
 ### Start work on a ticket
@@ -147,6 +149,16 @@ It works out the ticket from the session's own worktree (or give it: `seance add
 Every repo in a list is checked against the lookup table before any worktree is made, so a typo leaves nothing half-done. That last step is yours: Claude cannot run slash commands in its own session.
 
 For a large, separable change in another repo, a second session can suit better: `seance web-app PROJ-123 here` forks the conversation into that repo's worktree.
+
+### Work with no ticket
+
+```
+seance --no-jira my-service fix-ci-cache
+```
+
+Everything works as for a ticket (a fetched base, the worktree `my-service/.claude/worktrees/fix-ci-cache`, the branch `feature/fix-ci-cache`, a session named `my-service-fix-ci-cache`), but the second argument is taken as a plain name and nothing is read from Jira. The session gets up to speed on the repos and waits for you to describe the work. A name may use letters, digits, `.`, `_` and `-`, and its case is kept.
+
+`--no-jira` is needed only to create it. Once the worktree exists, `seance my-service fix-ci-cache` resumes it like any other. It works with several repos, forks and `seance add` too.
 
 ### See everything
 
