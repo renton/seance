@@ -79,7 +79,7 @@ seance <repo> <TICKET>                 session on the ticket's branch (resumes i
 seance <repo> <TICKET> <session-id>    fork that session onto the ticket's branch
 seance <repo> <TICKET> here            fork the session this runs inside
 seance <repo>,<repo2> <TICKET> ...     a worktree in each repo, one session across them
-seance add <repo> [<TICKET>]           inside a session: add a repo's worktree for its ticket
+seance add <repo>[,<repo2>] [<TICKET>] inside a session: add repos' worktrees for its ticket
 seance list                            repos, worktrees, branches and sessions
 seance pick                            choose a session from a menu and attach to or resume it
 seance repos                           the lookup table
@@ -123,7 +123,7 @@ The fork carries the whole conversation into a new session in the new ticket's w
 
 One session can work across several repos, with each repo getting its own worktree and branch (so one PR per repo, all carrying the ticket key) and the repo folders themselves left alone.
 
-Start it that way by listing the repos with commas:
+Start it that way by listing the repos with commas and no spaces:
 
 ```
 seance my-service,web-app PROJ-123
@@ -131,19 +131,20 @@ seance my-service,web-app PROJ-123
 
 This makes a worktree for `PROJ-123` in each repo, starts the session in the first, and gives it access to the others (`claude --add-dir`). Its first prompt lists every worktree. The same command resumes it later, with the same access.
 
-To bring in another repo once the session is running, have Claude run:
+To bring in more repos once the session is running, have Claude run:
 
 ```
 seance add web-app
+seance add web-app,api-gateway      # several at once, same comma list
 ```
 
-It works out the ticket from the session's own worktree (or give it: `seance add web-app PROJ-123`), creates the worktree, and prints a line for you to type at the session's prompt:
+It works out the ticket from the session's own worktree (or give it: `seance add web-app PROJ-123`), creates the worktrees, and prints a line per worktree for you to type at the session's prompt:
 
 ```
 /add-dir /home/me/code/web-app/.claude/worktrees/PROJ-123
 ```
 
-That last step is yours: Claude cannot run slash commands in its own session.
+Every repo in a list is checked against the lookup table before any worktree is made, so a typo leaves nothing half-done. That last step is yours: Claude cannot run slash commands in its own session.
 
 For a large, separable change in another repo, a second session can suit better: `seance web-app PROJ-123 here` forks the conversation into that repo's worktree.
 

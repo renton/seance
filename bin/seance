@@ -5,7 +5,7 @@
 #   seance <repo> <TICKET> <session-id>    fork that session onto the ticket's branch
 #   seance <repo> <TICKET> here            fork the session this runs inside
 #   seance <repo>,<repo2> <TICKET> ...     a worktree in each repo, one session across them
-#   seance add <repo> [<TICKET>]           inside a session: add a repo's worktree for its ticket
+#   seance add <repo>[,<repo2>] [<TICKET>] inside a session: add repos' worktrees for its ticket
 #   seance list                            repos, worktrees, branches and sessions
 #   seance pick                            choose a session from a menu and attach to or resume it
 #   seance repos                           the lookup table
@@ -290,18 +290,18 @@ start_session() {
   exec claude "${args[@]}" --session-id "$sid" "$prompt"
 }
 
-# Add a repo's worktree to the session this runs in, for the ticket that session works on.
+# Add repos' worktrees to the session this runs in, for the ticket that session works on.
 cmd_add() {
-  local repo_name=$1 ticket=${2:-} do_fetch=$3
+  local repos=$1 ticket=${2:-} do_fetch=$3
   if [[ -z "$ticket" ]]; then
-    [[ "$PWD/" =~ /$WORKTREE_DIR/([^/]+)/ ]] || die "cannot tell the ticket from $PWD; give it: seance add <repo> <TICKET>"
+    [[ "$PWD/" =~ /$WORKTREE_DIR/([^/]+)/ ]] || die "cannot tell the ticket from $PWD; give it: seance add <repo>[,<repo2>] <TICKET>"
     ticket=${BASH_REMATCH[1]}
   fi
   ticket=${ticket^^}
 
-  resolve_repo "$repo_name" "$ticket" "$do_fetch"
+  resolve_repos "$repos" "$ticket" "$do_fetch"
 
-  local sid=${CLAUDE_CODE_SESSION_ID:-} name="$repo_name-$ticket"
+  local sid=${CLAUDE_CODE_SESSION_ID:-} name="${REPO_NAMES[0]}-$ticket"
   if [[ -n "$sid" ]]; then
     local known
     known=$(awk -F'\t' -v sid="$sid" 'NR > 1 && $5 == sid { name = $4 } END { print name }' "$SESSIONS_FILE" 2>/dev/null || true)
@@ -309,9 +309,28 @@ cmd_add() {
     record_all "$ticket" "$name" "$sid" "-"
   fi
 
-  echo "Worktree ready: ${WORKTREES[0]} (branch ${BRANCHES[0]})"
+  local i
+  for i in "${!WORKTREES[@]}"; do
+    echo "Worktree ready: ${WORKTREES[$i]} (branch ${BRANCHES[$i]})"
+  done
   echo "Give the session access by typing this at its prompt:"
-  echo "  /add-dir ${WORKTREES[0]}"
+  for i in "${!WORKTREES[@]}"; do
+    echo "  /add-dir ${WORKTREES[$i]}"
+  done
+}
+
+# Resolve a comma-separated list of repos (no spaces) into REPO_NAMES, WORKTREES, BRANCHES.
+resolve_repos() {
+  local list=$1 ticket=$2 do_fetch=$3 name
+  local -a names
+  [[ "$list" =~ ^[^,[:space:]]+(,[^,[:space:]]+)*$ ]] || die "'$list' is not a repo or a comma-separated list of repos (no spaces)"
+  IFS=, read -ra names <<<"$list"
+  for name in "${names[@]}"; do
+    [[ -n "$(repo_field "$name" 2)" ]] || die "no repo '$name' in $REPOS_FILE (see: seance repos)"
+  done
+  for name in "${names[@]}"; do
+    resolve_repo "$name" "$ticket" "$do_fetch"
+  done
 }
 
 # Look a repo up, check it, and prepare its worktree; appends to REPO_NAMES, WORKTREES, BRANCHES.
@@ -534,13 +553,7 @@ main() {
     [[ -n "$source" ]] || die "'here' only works inside a Claude session"
   fi
 
-  local -a names
-  IFS=, read -ra names <<<"$repos"
-  [[ ${#names[@]} -gt 0 ]] || usage 1
-  local name
-  for name in "${names[@]}"; do
-    resolve_repo "$name" "$ticket" "$do_fetch"
-  done
+  resolve_repos "$repos" "$ticket" "$do_fetch"
 
   local previous
   previous=$(last_session_for "${WORKTREES[0]}")
