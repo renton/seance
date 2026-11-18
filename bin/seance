@@ -109,6 +109,31 @@ is_jira_key() { [[ "$1" =~ ^[A-Z][A-Z0-9]+-[0-9]+$ ]]; }
 # A session to fork: here, a session id, or its first 8 characters as seance list shows them.
 is_session_ref() { [[ "$1" == here || "$1" =~ ^[0-9a-f]{8}(-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$ ]]; }
 
+# The full session id for a full or 8-character one. claude --resume finds a full id from
+# any folder, but a short one only among the current folder's sessions, so seance always
+# passes the full id. Looks in seance's records, Claude's session list and the saved
+# conversations under ~/.claude/projects.
+full_session_id() {
+  local id=$1 matches
+  if [[ ${#id} -eq 36 ]]; then
+    echo "$id"
+    return
+  fi
+  matches=$({
+    awk -F'\t' -v id="$id" 'NR > 1 && index($5, id) == 1 && length($5) == 36 { print $5 }' "$SESSIONS_FILE" 2>/dev/null
+    claude agents --json --all 2>/dev/null | jq -r --arg id "$id" '.[] | .sessionId // empty | select(startswith($id))'
+    for f in "$HOME"/.claude/projects/*/"$id"*.jsonl; do
+      [[ -e "$f" ]] || continue
+      f=${f##*/}
+      f=${f%%.*}
+      [[ ${#f} -eq 36 ]] && echo "$f"
+    done
+  } | sort -u)
+  [[ -n "$matches" ]] || die "no session $id found (in seance list, claude agents or ~/.claude/projects)"
+  [[ $(wc -l <<<"$matches") -eq 1 ]] || die "$id matches more than one session; give the full id"
+  echo "$matches"
+}
+
 # The name for the worktree and branch: a Jira key (uppercased), or with --no-jira any plain name.
 # A plain name given without --no-jira is accepted when the first repo already has its worktree.
 work_name() {
@@ -885,6 +910,7 @@ main() {
   if [[ $# -gt 0 ]] && is_session_ref "$1"; then
     source=$1
     shift
+    [[ "$source" == here ]] || source=$(full_session_id "$source")
   fi
   if [[ $# -gt 0 ]]; then
     extra=$1
