@@ -24,19 +24,40 @@
 #              SEANCE_HOME           config folder, default ~/.seance
 #              SEANCE_JIRA_URL       your Jira site (https://example.atlassian.net), for ticket links
 #              SEANCE_NOTES_DIR      folder of notes on your repos (INDEX.md, <repo>.md) for new sessions to read
+#              All but SEANCE_HOME can also go in $SEANCE_HOME/config as NAME=value lines; the
+#              environment wins when both set one.
 
 set -euo pipefail
 
 SEANCE_HOME="${SEANCE_HOME:-$HOME/.seance}"
+CONFIG_FILE="$SEANCE_HOME/config"
 REPOS_FILE="$SEANCE_HOME/repos"
 SESSIONS_FILE="$SEANCE_HOME/sessions.tsv"
 TITLES_FILE="$SEANCE_HOME/titles.tsv"
 WORKTREE_DIR=".claude/worktrees"
-BRANCH_FORMAT="${SEANCE_BRANCH_FORMAT:-}"
+
+# A setting from the environment, else from the config file. The file is read as NAME=value
+# lines, never run; surrounding quotes are dropped and a leading ~/ means the home folder.
+setting() {
+  local name=$1 value=${!1:-}
+  if [[ -z "$value" && -f "$CONFIG_FILE" ]]; then
+    value=$(awk -v name="$name" '
+      /^[[:space:]]*(#|$)/ { next }
+      { line = $0; sub(/^[[:space:]]*(export[[:space:]]+)?/, "", line) }
+      index(line, name "=") == 1 { value = substr(line, length(name) + 2) }
+      END { print value }' "$CONFIG_FILE")
+    value=${value%"${value##*[![:space:]]}"}
+    if [[ "$value" =~ ^\"(.*)\"$ || "$value" =~ ^\'(.*)\'$ ]]; then value=${BASH_REMATCH[1]}; fi
+    [[ "$value" != "~/"* ]] || value="$HOME/${value#\~/}"
+  fi
+  printf '%s' "$value"
+}
+
+BRANCH_FORMAT=$(setting SEANCE_BRANCH_FORMAT)
 [[ -n "$BRANCH_FORMAT" ]] || BRANCH_FORMAT='feature/{ticket}'
-JIRA_URL="${SEANCE_JIRA_URL:-}"
+JIRA_URL=$(setting SEANCE_JIRA_URL)
 JIRA_URL="${JIRA_URL%/}"
-NOTES_DIR="${SEANCE_NOTES_DIR:-}"
+NOTES_DIR=$(setting SEANCE_NOTES_DIR)
 NOTES_DIR="${NOTES_DIR%/}"
 
 ticket_url() {

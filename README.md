@@ -47,22 +47,22 @@ for d in ~/code/*/; do git -C "$d" rev-parse --git-dir >/dev/null 2>&1 && printf
 
 ### Optional settings
 
-seance works without any of these. Each is an environment variable: add the `export` lines you want to your shell's startup file (`~/.bashrc` for bash, `~/.zshrc` for zsh), then open a new terminal or run `source ~/.bashrc`. Claude sessions you start afterwards see them too, so they also apply when Claude runs seance for you.
+seance works without any of these. Put the ones you want in `~/.seance/config`, one `NAME=value` per line:
+
+```
+# ~/.seance/config
+SEANCE_JIRA_URL=https://yourcompany.atlassian.net
+SEANCE_NOTES_DIR=~/notes/repos
+```
+
+seance reads that file however it is started (a terminal, the desktop app or its dock launcher, or Claude), so this is the place that always works. The file is read as plain lines, never run as a script; quotes around a value are dropped and a leading `~/` means your home folder. Each setting can also be an environment variable (an `export` line in `~/.bashrc`), which wins over the file when both set it. `SEANCE_HOME` itself can only be an environment variable, since it says where the file is.
 
 | Variable | Default | What it does |
 |---|---|---|
 | `SEANCE_BRANCH_FORMAT` | `feature/{ticket}` | The branch name for a ticket. `{ticket}` is required; `{repo}` is the name from the lookup table. |
-| `SEANCE_JIRA_URL` | unset | Your Jira site. Adds the ticket's link to the session's first prompt and to `seance list`. |
+| `SEANCE_JIRA_URL` | unset | Your Jira site. Adds the ticket's link to the session's first prompt, to `seance list`, and to the desktop app, where clicking a ticket opens it in your browser. |
 | `SEANCE_NOTES_DIR` | unset | A folder of notes on your repos: `INDEX.md` for how they connect, `<repo>.md` per repo (named as in the lookup table). A new session is told to read the ones that exist for its repos. |
-| `SEANCE_HOME` | `~/.seance` | Where the lookup table and session records live. |
-
-For example:
-
-```
-# ~/.bashrc
-export SEANCE_BRANCH_FORMAT='feature/{ticket}'
-export SEANCE_JIRA_URL=https://yourcompany.atlassian.net
-```
+| `SEANCE_HOME` | `~/.seance` | Where the lookup table and session records live (environment only). |
 
 **Branch format examples:** `feature/{ticket}` gives `feature/PROJ-123`; `{ticket}` gives `PROJ-123`; `me/{repo}/{ticket}` gives `me/my-service/PROJ-123`.
 
@@ -316,12 +316,13 @@ Categories=Development;
 StartupWMClass=seance
 ```
 
-A launcher does not read `~/.bashrc`, so set `SEANCE_JIRA_URL` (for ticket links) in `~/.config/environment.d/seance.conf` or `~/.profile` as well.
+A launcher does not read `~/.bashrc`, so keep your settings in `~/.seance/config` (see Optional settings), which seance reads however it is started.
 
 ## Files
 
 | File | What it holds |
 |---|---|
+| `~/.seance/config` | optional settings, `NAME=value` per line (see Optional settings) |
 | `~/.seance/repos` | the lookup table: `<name> <path> [base branch]` |
 | `~/.seance/sessions.tsv` | every session seance started: created, repo, ticket, name, session id, worktree, forked from |
 | `~/.seance/titles.tsv` | the few words each session named itself with: session id, words, when (the latest wins) |
