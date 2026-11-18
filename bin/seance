@@ -667,8 +667,8 @@ cmd_list_json() {
     | ($rows | map(.[4]) | reverse | uniq) as $sids
 
     | def session($a; $sid; $name; $repos; $ticket; $wts; $cwd; $ours; $forked; $created; $resumable):
-        (if $a == null or ($a.kind == "background" and $a.status == null) then "stopped"
-         elif $a.kind == "background" then (if $a.status == "busy" then "running" else $a.status end)
+        (if $a == null or ($a.kind == "background" and $a.status == null and ($a.state == "done" or $a.state == null)) then "stopped"
+         elif $a.kind == "background" then (if $a.status == "busy" or $a.status == null then "running" else $a.status end)
          else "open" end) as $state
         | {session_id: $sid, short_id: $sid[0:8], name: $name, ticket: $ticket,
            jira_url: (if $jira != "" and ($ticket | is_key) then "\($jira)/browse/\($ticket)" else null end),

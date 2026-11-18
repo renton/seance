@@ -320,4 +320,4 @@ A session id can be the full id or the 8 characters `seance list` shows. A fork'
 - Each session is a plain Claude Code session. seance chooses its folder, its name, the folders it may use (`--add-dir` for the session's other worktrees and `SEANCE_NOTES_DIR`) and its first prompt, then gets out of the way.
 - `claude --bg` ignores `--session-id`, so for background sessions seance reads the id back from `claude agents --json`.
 - When there is no terminal (Claude running seance through its shell tool), seance always starts the session in the background and prints the `claude attach` line.
-- A session's state comes from `claude agents --json --all`. A background session with no status has ended, so it is resumed rather than attached.
+- A session's state comes from `claude agents --json --all`. A background session with no status and the state `done` has ended, so it is resumed rather than attached; one with no status that is still `working` is just starting up.
