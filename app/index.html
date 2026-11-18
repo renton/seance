@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+  <title>seance</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">
+      <img class="mark" src="icon.svg" alt="">
+      <span class="wordmark">seance</span>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="View">
+      <button type="button" role="tab" data-view="table">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2 6.5h12M2 9.75h12M6 6.5V13"/></svg>
+        Table
+      </button>
+      <button type="button" role="tab" data-view="repos">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="4.5" rx="1.25"/><rect x="2" y="9" width="12" height="4.5" rx="1.25"/></svg>
+        Repos
+      </button>
+    </nav>
+    <div class="search">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+      <input id="filter" type="search" placeholder="Search tickets, repos, branches, sessions" spellcheck="false" autofocus>
+      <kbd>/</kbd>
+    </div>
+    <span id="updated" class="updated"></span>
+  </header>
+
+  <div class="toolbar">
+    <div id="status-chips" class="chips" role="group" aria-label="Filter by status"></div>
+    <div class="toolbar-right">
+      <label class="select">
+        <span class="sr-only">Repo</span>
+        <select id="repo-filter"></select>
+      </label>
+      <button id="reset" class="link-btn" type="button" hidden>Clear filters</button>
+    </div>
+  </div>
+
+  <div id="error" class="banner" role="alert" hidden></div>
+
+  <main id="table-view" class="table-wrap">
+    <table id="table">
+      <thead>
+        <tr>
+          <th data-key="status" class="col-status">Status</th>
+          <th data-key="ticket">Ticket and branch</th>
+          <th data-key="repo">Repos</th>
+          <th data-key="session">Session</th>
+          <th data-key="started" class="col-started">Started</th>
+          <th class="col-action"><span class="sr-only">Action</span></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div id="empty" class="empty" hidden></div>
+  </main>
+
+  <main id="cards" class="cards" hidden></main>
+
+  <footer class="foot"><span id="count"></span></footer>
+
+  <button id="new" class="fab" type="button" title="New session (n)" aria-label="New session">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+  </button>
+
+  <dialog id="create" class="dialog" aria-labelledby="create-title">
+    <form id="create-form" method="dialog" novalidate>
+      <header class="dialog-head">
+        <h2 id="create-title">New session</h2>
+        <p>A worktree and branch in each repo you choose, and a Claude session across them.</p>
+      </header>
+
+      <div class="field">
+        <label for="create-name">Ticket or branch name</label>
+        <input id="create-name" type="text" placeholder="PROJ-123" autocomplete="off" spellcheck="false" required>
+        <div id="create-name-hint" class="hint"></div>
+      </div>
+
+      <label class="check">
+        <input id="create-jira" type="checkbox" checked>
+        <span class="box" aria-hidden="true"></span>
+        <span>
+          <span class="check-title">Jira ticket</span>
+          <span class="check-sub">The session reads the ticket from Jira. Untick for work with no ticket.</span>
+        </span>
+      </label>
+
+      <div class="field">
+        <div class="field-row">
+          <label for="create-repo-search">Repos</label>
+          <span class="hint">The first one you tick is where the session runs.</span>
+        </div>
+        <div id="create-picked" class="picked"></div>
+        <input id="create-repo-search" class="repo-search" type="search" placeholder="Filter repos" autocomplete="off" spellcheck="false">
+        <div id="create-repos" class="repo-list" role="group" aria-label="Repos"></div>
+      </div>
+
+      <div class="command">
+        <span class="command-label">Runs</span>
+        <code id="create-command"></code>
+      </div>
+
+      <footer class="dialog-foot">
+        <button type="button" id="create-cancel" class="btn">Cancel</button>
+        <button type="submit" id="create-submit" class="btn primary">Create</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="renderer.js"></script>
+</body>
+</html>

@@ -271,6 +271,52 @@ git worktree remove .claude/worktrees/PROJ-123
 git branch -d feature/PROJ-123      # -D after a squash merge
 ```
 
+## Desktop app
+
+`app/` is a small [Electron](https://www.electronjs.org/) window onto `seance list`: every session and ticket worktree in a sortable, filterable table (or as a card per repo), a button to attach to or resume each one in a terminal, and a + button to start a new one. It keeps no data of its own: it runs `seance list --json` every few seconds and acts only through `seance`.
+
+Needs Node 22 or newer and [Terminator](https://gnome-terminator.org/) (set `SEANCE_APP_TERMINAL` to use another terminal that takes `-T <title> -x <command>`).
+
+```
+cd app
+npm install
+npm start          # the first run downloads Electron's binary
+```
+
+The page has no access to your system. It can ask the app for three things only: the list, opening a session by id, and starting a session for a name and a set of repos from the lookup table. The app checks each request against a fresh `seance list --json` before it runs `seance` in a new terminal, and only opens Jira links that seance itself produced.
+
+**Ubuntu 24.04 and later** block the sandbox Electron uses, so the app crashes on start with "The SUID sandbox helper binary was found, but is not configured correctly". Allow it for this one binary with an AppArmor profile (adjust the path):
+
+```
+sudo tee /etc/apparmor.d/seance-electron >/dev/null <<'EOF'
+abi <abi/4.0>,
+include <tunables/global>
+
+profile seance-electron /home/me/seance/app/node_modules/electron/dist/electron flags=(unconfined) {
+  userns,
+
+  include if exists <local/seance-electron>
+}
+EOF
+sudo apparmor_parser -r /etc/apparmor.d/seance-electron
+```
+
+**A launcher** for the dock: save this as `~/.local/share/applications/seance.desktop` (adjust the paths), then find seance with the Super key and pin it.
+
+```
+[Desktop Entry]
+Type=Application
+Name=seance
+Comment=Claude sessions for your tickets, by repo and worktree
+Exec=/home/me/seance/app/node_modules/electron/dist/electron /home/me/seance/app
+Icon=/home/me/seance/app/icon.svg
+Terminal=false
+Categories=Development;
+StartupWMClass=seance
+```
+
+A launcher does not read `~/.bashrc`, so set `SEANCE_JIRA_URL` (for ticket links) in `~/.config/environment.d/seance.conf` or `~/.profile` as well.
+
 ## Files
 
 | File | What it holds |

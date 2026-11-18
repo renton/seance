@@ -1,0 +1,15 @@
+{
+  "name": "seance-app",
+  "productName": "seance",
+  "desktopName": "seance.desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A window onto seance list: every repo, worktree and session, with a button to open each in a terminal.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^45.3.4"
+  }
+}
