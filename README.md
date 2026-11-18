@@ -84,6 +84,7 @@ seance add <repo>[,<repo2>] [<TICKET>] inside a session: add repos' worktrees fo
 seance list                            repos, worktrees, branches and sessions
 seance list --json                     the same as JSON, for other tools
 seance pick                            choose a session from a menu and attach to or resume it
+seance open <session-id>               attach to or resume that session, as pick would
 seance repos                           the lookup table
 seance --no-jira <repo> <name> ...     the same for work with no ticket: any name, nothing read from Jira
 seance help
@@ -245,6 +246,8 @@ Lists every session from `seance list`, newest first, one line each, and acts on
 - running in the background (busy or idle): `claude attach`
 - stopped, or a background session that has ended: resumes it in its worktree, as `seance <repo> <TICKET>` would, with access to every worktree recorded for it (including ones added with `seance add`)
 - open in another terminal: says so
+
+`seance open <session-id>` does the same for one session without the menu (the full id, or the 8 characters `seance list` shows), for scripts and launchers: for example `terminator -x seance open 3f2a9c1e`. For a session already open in another terminal it says so and exits non-zero.
 
 The menu uses [fzf](https://github.com/junegunn/fzf) when it is installed (type part of a ticket or repo to narrow it down), and a numbered `select` list otherwise. Stopped sessions whose worktree has been removed are left out.
 

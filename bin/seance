@@ -10,6 +10,7 @@
 #   seance list                            repos, worktrees, branches and sessions
 #   seance list --json                     the same as JSON, for other tools
 #   seance pick                            choose a session from a menu and attach to or resume it
+#   seance open <session-id>               attach to or resume that session, as pick would
 #   seance repos                           the lookup table
 #   seance --no-jira <repo> <name> ...     the same for work with no ticket: any name, nothing read from Jira
 #
@@ -576,15 +577,16 @@ cmd_list_json() {
 # One line per session, newest first: action, target, dir, repo, name, short id, state.
 # action is attach (target: agent id), open (target: pid) or resume (target: session id).
 # dir is - except for a session seance did not start: the folder to resume it in.
+PICK_ROW='[.action,
+    (if .action == "attach" then .attach_id elif .action == "open" then (.pid | tostring) else .session_id end),
+    (if .from_seance or .action != "resume" then "-" else .cwd end),
+    (.repos | join(",")), .name, .short_id,
+    ((if .state == "stopped" then "stopped" elif .kind == "background" then "background \(.status)" else "\(.kind) \(.status)" end)
+     + (if .from_seance then "" else "  (not from seance)" end))]
+  | join("\t")'
+
 pick_rows() {
-  cmd_list_json | jq -r '.sessions[] | select(.action != "resume" or .resumable)
-    | [.action,
-       (if .action == "attach" then .attach_id elif .action == "open" then (.pid | tostring) else .session_id end),
-       (if .from_seance or .action != "resume" then "-" else .cwd end),
-       (.repos | join(",")), .name, .short_id,
-       ((if .state == "stopped" then "stopped" elif .kind == "background" then "background \(.status)" else "\(.kind) \(.status)" end)
-        + (if .from_seance then "" else "  (not from seance)" end))]
-    | join("\t")'
+  cmd_list_json | jq -r ".sessions[] | select(.action != \"resume\" or .resumable) | $PICK_ROW"
 }
 
 # The worktrees a session was recorded in, the one it started in first.
@@ -625,19 +627,24 @@ cmd_pick() {
     [[ -n "$i" ]] || exit 0
   fi
 
-  target=${targets[$i]}
-  case ${actions[$i]} in
+  act_on "${actions[$i]}" "${targets[$i]}" "${dirs_in[$i]}"
+}
+
+# Do a pick row's action: attach to it, say it is open elsewhere, or resume it.
+act_on() {
+  local action=$1 target=$2 dir=$3 wts=() wt
+  case $action in
     attach) exec claude attach "$target" ;;
-    open) echo "Already open in another terminal (pid $target)." ;;
+    open) die "already open in another terminal (pid $target)" ;;
     resume)
-      if [[ "${dirs_in[$i]}" != - ]]; then
-        cd "${dirs_in[$i]}"
-        note "resuming ${target:0:8} in ${dirs_in[$i]}"
+      if [[ "$dir" != - ]]; then
+        cd "$dir"
+        note "resuming ${target:0:8} in $dir"
         exec claude --resume "$target"
       fi
       mapfile -t wts < <(session_worktrees "$target")
+      [[ ${#wts[@]} -gt 0 && -d "${wts[0]}" ]] || die "session ${target:0:8} has no worktree left to resume in"
       local -a dirs=()
-      local wt
       for wt in "${wts[@]:1}"; do
         [[ -d "$wt" ]] && dirs+=(--add-dir "$wt")
       done
@@ -646,6 +653,16 @@ cmd_pick() {
       exec claude --resume "$target" "${dirs[@]}"
       ;;
   esac
+}
+
+# Open one session by id (full or the 8-character short id): what pick does with a chosen row.
+cmd_open() {
+  local id=$1 row action target dir
+  [[ "$id" =~ ^[0-9a-f]{8}(-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$ ]] || die "'$id' is not a session id"
+  row=$(cmd_list_json | jq -r --arg id "$id" "[.sessions[] | select(.session_id == \$id or .short_id == \$id)] | first // empty | $PICK_ROW")
+  [[ -n "$row" ]] || die "no session $id (see: seance list)"
+  IFS=$'\t' read -r action target dir _ <<<"$row"
+  act_on "$action" "$target" "$dir"
 }
 
 main() {
@@ -670,6 +687,11 @@ main() {
       return
       ;;
     pick) cmd_pick; return ;;
+    open)
+      [[ $# -eq 2 ]] || usage 1
+      cmd_open "$2"
+      return
+      ;;
     repos) cmd_repos; return ;;
   esac
 
