@@ -82,6 +82,7 @@ seance <repo>,<repo2> <TICKET> ...     a worktree in each repo, one session acro
 seance <repo> <TICKET> [...] "<prompt>"  your own first prompt instead of "get oriented and wait"
 seance add <repo>[,<repo2>] [<TICKET>] inside a session: add repos' worktrees for its ticket
 seance list                            repos, worktrees, branches and sessions
+seance list --json                     the same as JSON, for other tools
 seance pick                            choose a session from a menu and attach to or resume it
 seance repos                           the lookup table
 seance --no-jira <repo> <name> ...     the same for work with no ticket: any name, nothing read from Jira
@@ -193,6 +194,45 @@ seance list
 Worktrees under `.claude/worktrees/` are shown by their folder name (the ticket). Colour is used only when the output is a terminal.
 
 Every repo in the table, each worktree with its branch, and the sessions in it: seance's own, plus any other running session in that folder.
+
+### As JSON, for other tools
+
+```
+seance list --json
+```
+
+The same information for a UI or script to read. `version` changes only if the shape does.
+
+```
+{
+  "version": 1,
+  "generated": "2026-11-18T15:04:05Z",
+  "repos": [
+    { "name": "my-service", "path": "/home/me/code/my-service", "base": null, "present": true,
+      "worktrees": [
+        { "path": "/home/me/code/my-service", "branch": "main", "repo_folder": true,
+          "ticket": null, "jira_url": null, "session_ids": [] },
+        { "path": "/home/me/code/my-service/.claude/worktrees/PROJ-123", "branch": "feature/PROJ-123",
+          "repo_folder": false, "ticket": "PROJ-123",
+          "jira_url": "https://yourcompany.atlassian.net/browse/PROJ-123",
+          "session_ids": ["3f2a9c1e-..."] } ] } ],
+  "sessions": [
+    { "session_id": "3f2a9c1e-...", "short_id": "3f2a9c1e", "name": "my-service-PROJ-123",
+      "ticket": "PROJ-123", "jira_url": "https://...", "repos": ["my-service"],
+      "worktrees": ["/home/me/code/my-service/.claude/worktrees/PROJ-123"],
+      "cwd": "/home/me/code/my-service/.claude/worktrees/PROJ-123",
+      "state": "idle", "kind": "background", "status": "idle",
+      "from_seance": true, "forked_from": null, "created": "2026-11-18T10:57:27-05:00",
+      "action": "attach", "attach_id": "3f2a9c1e", "pid": null, "resumable": true } ]
+}
+```
+
+- `sessions` is newest first: seance's own, then any other session running in one of your repos (`from_seance: false`).
+- `state` is `running`, `idle` (both background), `open` (in a terminal somewhere) or `stopped`.
+- `action` is what to do with it: `attach` (`claude attach <attach_id>`), `open` (already open, `pid` says where) or `resume`. `seance pick` follows the same rules, and is built on this output.
+- `resumable` is false when a stopped session's worktree has been removed.
+- `base` is the pinned base branch from the lookup table, or null for the remote's default. `present` is false when the repo's folder is missing.
+- `jira_url` is set only when `SEANCE_JIRA_URL` is and the name is a Jira key.
 
 ### Pick a session from a menu
 

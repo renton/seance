@@ -8,6 +8,7 @@
 #   seance <repo> <TICKET> [...] "<prompt>"  your own first prompt instead of "get oriented and wait"
 #   seance add <repo>[,<repo2>] [<TICKET>] inside a session: add repos' worktrees for its ticket
 #   seance list                            repos, worktrees, branches and sessions
+#   seance list --json                     the same as JSON, for other tools
 #   seance pick                            choose a session from a menu and attach to or resume it
 #   seance repos                           the lookup table
 #   seance --no-jira <repo> <name> ...     the same for work with no ticket: any name, nothing read from Jira
@@ -492,41 +493,98 @@ cmd_list() {
           (.[] | select(.cwd == $wt and ((.sessionId | IN($ourIds[])) | not))
             | "     └─ \(.name)  \($dim)\(.sessionId[0:8])\($reset)  \(.kind) \(.status // .state)  \($dim)(not from seance)\($reset)")
       ' <<<"$agents"
-    done < <(git -C "$path" worktree list --porcelain | awk '
-      /^worktree / { path = substr($0, 10); branch = "" }
-      /^branch /   { branch = substr($0, 19) }
-      /^detached/  { branch = "(detached)" }
-      /^$/         { if (path != "") print path "\t" branch; path = "" }
-      END          { if (path != "") print path "\t" branch }')
+    done < <(worktree_rows "$path")
   done < <(repo_names)
+}
+
+# A repo's worktrees, its own folder first: path, branch (or "(detached)").
+worktree_rows() {
+  git -C "$1" worktree list --porcelain | awk '
+    /^worktree / { path = substr($0, 10); branch = "" }
+    /^branch /   { branch = substr($0, 19) }
+    /^detached/  { branch = "(detached)" }
+    /^$/         { if (path != "") print path "\t" branch; path = "" }
+    END          { if (path != "") print path "\t" branch }'
+}
+
+# Everything seance knows, as JSON for other tools: repos with their worktrees, and sessions.
+# A session's state is running, idle, open (in a terminal somewhere) or stopped, and its
+# action is what to do with it: attach (attach_id), open (already open: pid) or resume.
+cmd_list_json() {
+  [[ -f "$REPOS_FILE" ]] || die "no lookup table at $REPOS_FILE"
+  local agents registry worktrees name path
+  agents=$(claude agents --json --all 2>/dev/null || echo '[]')
+  registry=$(tail -n +2 "$SESSIONS_FILE" 2>/dev/null || true)
+  worktrees=$(while IFS=$'\t' read -r name path; do
+    [[ -d "$path/.git" || -f "$path/.git" ]] || continue
+    worktree_rows "$path" | sed "s|^|$name\t|"
+  done < <(repo_names))
+
+  jq -n --argjson agents "$agents" --arg reg "$registry" --arg wts "$worktrees" \
+    --arg repos "$(awk '$0 !~ /^[[:space:]]*(#|$)/ { print $1 "\t" $2 "\t" $3 }' "$REPOS_FILE")" \
+    --arg wtdir "$WORKTREE_DIR" --arg jira "$JIRA_URL" '
+    def lines($s): $s | split("\n") | map(select(length > 0) | split("\t"));
+    def uniq: reduce .[] as $x ([]; if index([$x]) then . else . + [$x] end);
+    def nonempty: if . == "" then null else . end;
+    def ticket_of: if . != null and contains("/" + $wtdir + "/") then split("/" + $wtdir + "/") | last | split("/")[0] else null end;
+    def is_key: . != null and test("^[A-Z][A-Z0-9]+-[0-9]+$");
+
+    lines($reg) as $rows
+    | (lines($repos) | map({name: .[0], path: (.[1] | rtrimstr("/")), base: (.[2] // "" | nonempty)})) as $repotab
+    | (lines($wts) | map({repo: .[0], path: .[1], branch: (.[2] | nonempty)})) as $wtl
+    | ($wtl | map(.path)) as $wtpaths
+    | ($agents | map({key: .sessionId, value: .}) | from_entries) as $live
+    | ($rows | map(.[4]) | reverse | uniq) as $sids
+
+    | def session($a; $sid; $name; $repos; $ticket; $wts; $cwd; $ours; $forked; $created; $resumable):
+        (if $a == null or ($a.kind == "background" and $a.status == null) then "stopped"
+         elif $a.kind == "background" then (if $a.status == "busy" then "running" else $a.status end)
+         else "open" end) as $state
+        | {session_id: $sid, short_id: $sid[0:8], name: $name, ticket: $ticket,
+           jira_url: (if $jira != "" and ($ticket | is_key) then "\($jira)/browse/\($ticket)" else null end),
+           repos: $repos, worktrees: $wts, cwd: $cwd, state: $state,
+           kind: (if $state == "stopped" then null else $a.kind end),
+           status: (if $state == "stopped" then null else ($a.status // $a.state) end),
+           from_seance: $ours, forked_from: (if $forked == "-" then null else $forked end), created: $created,
+           action: (if $state == "stopped" then "resume" elif $a.kind == "background" then "attach" else "open" end),
+           attach_id: (if $state == "stopped" or $a.kind != "background" then null else $a.id end),
+           pid: (if $state == "open" then $a.pid else null end),
+           resumable: $resumable};
+      def wt_of($c): [$wtl[] | . as $w | select($c == $w.path or ($c | startswith($w.path + "/")))] | max_by(.path | length);
+
+      [ $sids[] as $sid
+        | ($rows | map(select(.[4] == $sid))) as $mine
+        | ($mine | map(.[5]) | uniq) as $wt
+        | session($live[$sid] // null; $sid; $mine[0][3]; ($mine | map(.[1]) | uniq); $mine[0][2];
+                  $wt; $wt[0]; true; $mine[0][6]; $mine[0][0]; ($wt[0] | IN($wtpaths[]))) ]
+      + [ $agents[] | select(.sessionId | IN($sids[]) | not) | wt_of(.cwd) as $w | select($w != null)
+          | session(.; .sessionId; .name; [$w.repo]; ($w.path | ticket_of); [$w.path]; .cwd; false; "-";
+                    (if .startedAt then (.startedAt / 1000 | floor | todate) else null end); true) ]
+    | . as $sessions
+
+    | {version: 1, generated: (now | floor | todate),
+       repos: [$repotab[] | . as $r
+         | ($wtl | map(select(.repo == $r.name))) as $mine
+         | {name, path, base, present: ($mine | length > 0),
+            worktrees: [$mine[] | . as $w | (.path | ticket_of) as $t
+              | {path, branch, repo_folder: (.path == $r.path), ticket: $t,
+                 jira_url: (if $jira != "" and ($t | is_key) then "\($jira)/browse/\($t)" else null end),
+                 session_ids: [$sessions[] | select(.worktrees | index([$w.path])) | .session_id]}]}],
+       sessions: $sessions}'
 }
 
 # One line per session, newest first: action, target, dir, repo, name, short id, state.
 # action is attach (target: agent id), open (target: pid) or resume (target: session id).
 # dir is - except for a session seance did not start: the folder to resume it in.
-# A background session with no status has ended, so it is resumed rather than attached.
 pick_rows() {
-  local agents registry
-  agents=$(claude agents --json --all 2>/dev/null || echo '[]')
-  registry=$(tail -n +2 "$SESSIONS_FILE" 2>/dev/null || true)
-  jq -r --arg reg "$registry" --arg roots "$(repo_names)" '
-    ($reg | split("\n") | map(select(length > 0) | split("\t"))) as $rows
-    | ($roots | split("\n") | map(select(length > 0) | split("\t") | {name: .[0], path: (.[1] | rtrimstr("/"))})) as $roots
-    | (map({key: .sessionId, value: .}) | from_entries) as $live
-    | ($rows | map(.[4]) | reverse
-       | reduce .[] as $s ([]; if index([$s]) then . else . + [$s] end)) as $sids
-    | def repo_of($c): [$roots[] | . as $r | select($c == $r.path or ($c | startswith($r.path + "/"))) | .name] | first;
-      def row($a; $dir; $repo; $name; $sid; $extra):
-        if $a == null or ($a.kind == "background" and $a.status == null) then ["resume", $sid, $dir, $repo, $name, $sid[0:8], "stopped" + $extra]
-        elif $a.kind == "background" then ["attach", $a.id, "-", $repo, $name, $sid[0:8], "background \($a.status)" + $extra]
-        else ["open", ($a.pid | tostring), "-", $repo, $name, $sid[0:8], "\($a.kind) \($a.status // $a.state)" + $extra] end
-        | join("\t");
-      ($sids[] | . as $sid | ($rows | map(select(.[4] == $sid))) as $mine
-        | ($mine | map(.[1]) | reduce .[] as $r ([]; if index([$r]) then . else . + [$r] end) | join(",")) as $repos
-        | row($live[$sid] // null; "-"; $repos; $mine[0][3]; $sid; "")),
-      (.[] | select(.sessionId | IN($sids[]) | not) | repo_of(.cwd) as $repo | select($repo != null)
-        | row(.; .cwd; $repo; .name; .sessionId; "  (not from seance)"))
-  ' <<<"$agents"
+  cmd_list_json | jq -r '.sessions[] | select(.action != "resume" or .resumable)
+    | [.action,
+       (if .action == "attach" then .attach_id elif .action == "open" then (.pid | tostring) else .session_id end),
+       (if .from_seance or .action != "resume" then "-" else .cwd end),
+       (.repos | join(",")), .name, .short_id,
+       ((if .state == "stopped" then "stopped" elif .kind == "background" then "background \(.status)" else "\(.kind) \(.status)" end)
+        + (if .from_seance then "" else "  (not from seance)" end))]
+    | join("\t")'
 }
 
 # The worktrees a session was recorded in, the one it started in first.
@@ -591,9 +649,10 @@ cmd_pick() {
 }
 
 main() {
-  local background=auto do_fetch=auto force_new=no no_jira=no
+  local background=auto do_fetch=auto force_new=no no_jira=no json=no
   while [[ $# -gt 0 && "$1" == -* ]]; do
     case "$1" in
+      --json) json=yes ;;
       --bg) background=yes ;;
       --no-fetch) do_fetch=no ;;
       -n | --no-jira) no_jira=yes ;;
@@ -606,7 +665,10 @@ main() {
 
   case "${1:-}" in
     "" | help | -h) usage 0 ;;
-    list) cmd_list; return ;;
+    list)
+      if [[ "$json" == yes || "${2:-}" == --json ]]; then cmd_list_json; else cmd_list; fi
+      return
+      ;;
     pick) cmd_pick; return ;;
     repos) cmd_repos; return ;;
   esac
