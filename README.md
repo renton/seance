@@ -36,7 +36,7 @@ my-service    /home/me/code/my-service
 web-app       /home/me/code/web-app      develop
 ```
 
-The base branch is optional. Without it seance uses the remote's default branch (`origin/HEAD`, else `origin/main`, else `origin/master`).
+The base branch is optional. Without it seance uses the remote's default branch (`origin/HEAD`, else `origin/main`, else `origin/master`). For one ticket, `--base <branch>` overrides it for every repo in that command (`seance --base develop my-service PROJ-123`; `origin/develop` works too). It only matters when the ticket's branch is new: an existing branch or worktree is used as it is, and seance says the option was ignored. The desktop app's New and Fork dialogs have the same option as an optional Base branch field.
 
 To list every git checkout under a folder as a starting point:
 
@@ -94,6 +94,7 @@ options (before the arguments):
   --bg        start the session in the background
   --new       start a fresh session even if the ticket already has one
   --no-fetch  branch from origin/<base> as last fetched
+  --base <branch>  start new branches from origin/<branch> (develop, release/2.4, ...)
   -n, --no-jira  the second argument is a plain name, not a Jira key
 ```
 

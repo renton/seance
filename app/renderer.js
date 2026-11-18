@@ -665,6 +665,19 @@ $('rename-form').addEventListener('submit', async (e) => {
 const dialog = $('create');
 const nameInput = $('create-name');
 const jiraBox = $('create-jira');
+const baseInput = $('create-base');
+
+// A branch to start from, as seance --base takes it: origin/ is optional and dropped.
+const BASE_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+function baseValue() {
+  return baseInput.value.trim().replace(/^origin\//, '');
+}
+function baseProblem() {
+  const base = baseValue();
+  if (!base) return '';
+  const bad = !BASE_NAME.test(base) || base.includes('..') || base.includes('//') || base.endsWith('/') || base.endsWith('.lock');
+  return bad ? 'Not a branch name. Something like develop or release/2.4.' : '';
+}
 const repoSearch = $('create-repo-search');
 const submit = $('create-submit');
 let chosen = [];
@@ -726,8 +739,13 @@ function updateCreate() {
   nameInput.placeholder = jiraBox.checked ? 'PROJ-123' : 'fix-ci-cache';
 
   const shownName = name ? (jiraBox.checked ? name.toUpperCase() : name) : jiraBox.checked ? '<TICKET>' : '<name>';
-  $('create-command').textContent = `seance ${jiraBox.checked ? '' : '-n '}${chosen.length ? chosen.join(',') : '<repos>'} ${shownName}${forkSource ? ' ' + forkSource.short_id : ''}`;
-  submit.disabled = !name || Boolean(problem) || !chosen.length;
+  const base = baseValue();
+  const baseHint = $('create-base-hint');
+  baseHint.textContent = baseProblem();
+  baseHint.classList.toggle('error', Boolean(baseProblem()));
+  baseInput.classList.toggle('invalid', Boolean(baseProblem()));
+  $('create-command').textContent = `seance ${base && !baseProblem() ? `--base ${base} ` : ''}${jiraBox.checked ? '' : '-n '}${chosen.length ? chosen.join(',') : '<repos>'} ${shownName}${forkSource ? ' ' + forkSource.short_id : ''}`;
+  submit.disabled = !name || Boolean(problem) || Boolean(baseProblem()) || !chosen.length;
 }
 
 // With a session, the dialog forks it: the new session starts with that conversation.
@@ -751,6 +769,7 @@ function openCreate(source = null) {
   submit.textContent = source ? 'Fork' : 'Create';
   nameInput.value = '';
   jiraBox.checked = true;
+  baseInput.value = '';
   repoSearch.value = '';
   const present = new Set(data.repos.filter((r) => r.present).map((r) => r.name));
   chosen = source ? source.repos.filter((r) => present.has(r)) : view.repo ? [view.repo] : [];
@@ -762,6 +781,7 @@ function openCreate(source = null) {
 $('new').addEventListener('click', () => openCreate());
 $('create-cancel').addEventListener('click', () => dialog.close());
 nameInput.addEventListener('input', updateCreate);
+baseInput.addEventListener('input', updateCreate);
 jiraBox.addEventListener('change', updateCreate);
 repoSearch.addEventListener('input', renderRepoList);
 repoSearch.addEventListener('keydown', (e) => { if (e.key === 'Enter') e.preventDefault(); });
@@ -771,6 +791,7 @@ $('create-form').addEventListener('submit', async (e) => {
   if (submit.disabled) return;
   const request = { name: nameInput.value.trim(), jira: jiraBox.checked, repos: chosen };
   if (forkSource) request.fork = forkSource.session_id;
+  if (baseValue()) request.base = baseValue();
   const result = await create(request, submit);
   if (result.ok) dialog.close();
   else {

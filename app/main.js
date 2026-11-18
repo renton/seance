@@ -93,7 +93,7 @@ ipcMain.handle('seance:open', async (_event, sessionId) => {
 // Start (or resume) a session for a ticket or a plain name across the chosen repos, the
 // first being where it runs: seance [--no-jira] <repo>,<repo2> <name>.
 ipcMain.handle('seance:create', async (_event, request) => {
-  const { name, jira, repos, fork } = request || {};
+  const { name, jira, repos, fork, base } = request || {};
   if (typeof name !== 'string' || typeof jira !== 'boolean' || !Array.isArray(repos)) {
     return { ok: false, message: 'malformed request' };
   }
@@ -117,8 +117,16 @@ ipcMain.handle('seance:create', async (_event, request) => {
     if (typeof fork !== 'string' || !SESSION_ID.test(fork)) return { ok: false, message: 'not a session id to fork' };
     if (!data.sessions.some((s) => s.session_id === fork)) return { ok: false, message: 'the session to fork is gone; the list will refresh' };
   }
+  let baseArgs = [];
+  if (base !== undefined) {
+    const branch = typeof base === 'string' ? base.trim().replace(/^origin\//, '') : '';
+    const ok = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch) && !branch.includes('..') && !branch.includes('//')
+      && !branch.endsWith('/') && !branch.endsWith('.lock');
+    if (!ok) return { ok: false, message: `"${base}" is not a branch name` };
+    baseArgs = ['--base', branch];
+  }
   const ticket = jira ? name.toUpperCase() : name;
-  const args = [...(jira ? [] : ['--no-jira']), repos.join(','), ticket, ...(fork ? [fork] : [])];
+  const args = [...baseArgs, ...(jira ? [] : ['--no-jira']), repos.join(','), ticket, ...(fork ? [fork] : [])];
   return seanceInTerminal(`${repos[0]}-${ticket}`, args);
 });
 

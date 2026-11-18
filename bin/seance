@@ -18,6 +18,7 @@
 # Options (before the arguments): --bg        start in the background
 #                                  --new       start a fresh session even if the ticket has one
 #                                  --no-fetch  branch from origin/<base> as last fetched
+#                                  --base <branch>  branch new worktrees from origin/<branch> (e.g. develop)
 #                                  -n, --no-jira  the second argument is a plain name, not a Jira key
 #
 # Environment: SEANCE_BRANCH_FORMAT  branch name template, default feature/{ticket} ({repo} also works)
@@ -35,6 +36,7 @@ REPOS_FILE="$SEANCE_HOME/repos"
 SESSIONS_FILE="$SEANCE_HOME/sessions.tsv"
 TITLES_FILE="$SEANCE_HOME/titles.tsv"
 WORKTREE_DIR=".claude/worktrees"
+BASE_OVERRIDE=""
 
 # A setting from the environment, else from the config file. The file is read as NAME=value
 # lines, never run; surrounding quotes are dropped and a leading ~/ means the home folder.
@@ -177,6 +179,7 @@ prepare_worktree() {
   existing=$(worktree_for_branch "$repo" "$branch")
   if [[ -n "$existing" ]]; then
     note "reusing worktree $existing ($branch)"
+    [[ -z "$BASE_OVERRIDE" ]] || note "--base $BASE_OVERRIDE ignored: the worktree is already there"
     WORKTREE=$existing
     return
   fi
@@ -184,15 +187,18 @@ prepare_worktree() {
 
   if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then
     note "branch $branch exists; checking it out in a new worktree"
+    [[ -z "$BASE_OVERRIDE" ]] || note "--base $BASE_OVERRIDE ignored: the branch is already there"
     git -C "$repo" worktree add "$wt" "$branch" >&2
   else
     base=$(default_branch "$repo" "$pinned")
     if [[ "$do_fetch" == yes ]]; then
       note "fetching origin/$base"
-      git -C "$repo" fetch origin "$base" >&2
+      git -C "$repo" fetch origin "$base" >&2 || die "could not fetch origin/$base in $repo; does that branch exist on the remote?"
     else
       note "not fetching; $branch starts from origin/$base as of the last fetch"
     fi
+    git -C "$repo" rev-parse --verify --quiet "refs/remotes/origin/$base" >/dev/null ||
+      die "$repo has no origin/$base to branch from"
     git -C "$repo" worktree add --no-track -b "$branch" "$wt" "origin/$base" >&2
   fi
   WORKTREE=$wt
@@ -502,7 +508,7 @@ resolve_repos() {
 resolve_repo() {
   local repo_name=$1 ticket=$2 do_fetch=$3 path pinned branch
   path=$(repo_field "$repo_name" 2)
-  pinned=$(repo_field "$repo_name" 3)
+  pinned=${BASE_OVERRIDE:-$(repo_field "$repo_name" 3)}
   [[ -n "$path" ]] || die "no repo '$repo_name' in $REPOS_FILE (see: seance repos)"
   git -C "$path" rev-parse --git-dir >/dev/null 2>&1 || die "$path is not a git repository"
   branch=$(branch_name "$repo_name" "$ticket")
@@ -766,6 +772,12 @@ main() {
       --json) json=yes ;;
       --bg) background=yes ;;
       --no-fetch) do_fetch=no ;;
+      --base)
+        [[ $# -ge 2 ]] || die "--base needs a branch, for example: --base develop"
+        BASE_OVERRIDE=$2
+        shift
+        ;;
+      --base=*) BASE_OVERRIDE=${1#--base=} ;;
       -n | --no-jira) no_jira=yes ;;
       --new) force_new=yes ;;
       -h | --help) usage 0 ;;
@@ -773,6 +785,10 @@ main() {
     esac
     shift
   done
+  if [[ -n "$BASE_OVERRIDE" ]]; then
+    BASE_OVERRIDE=${BASE_OVERRIDE#origin/}
+    git check-ref-format --branch "$BASE_OVERRIDE" >/dev/null 2>&1 || die "'$BASE_OVERRIDE' is not a branch name (--base)"
+  fi
 
   case "${1:-}" in
     "" | help | -h) usage 0 ;;
