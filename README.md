@@ -90,7 +90,7 @@ options (before the arguments):
   --bg        start the session in the background
   --new       start a fresh session even if the ticket already has one
   --no-fetch  branch from origin/<base> as last fetched
-  --no-jira   the second argument is a plain name, not a Jira key
+  -n, --no-jira  the second argument is a plain name, not a Jira key
 ```
 
 ### Start work on a ticket
@@ -154,6 +154,7 @@ For a large, separable change in another repo, a second session can suit better:
 
 ```
 seance --no-jira my-service fix-ci-cache
+seance -n my-service fix-ci-cache          # the same
 ```
 
 Everything works as for a ticket (a fetched base, the worktree `my-service/.claude/worktrees/fix-ci-cache`, the branch `feature/fix-ci-cache`, a session named `my-service-fix-ci-cache`), but the second argument is taken as a plain name and nothing is read from Jira. The session gets up to speed on the repos and waits for you to describe the work. A name may use letters, digits, `.`, `_` and `-`, and its case is kept.
